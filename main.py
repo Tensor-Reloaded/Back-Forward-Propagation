@@ -6,6 +6,7 @@ import numpy as np
 import torch.backends.cudnn as cudnn
 import torch.optim as optim
 import torch.utils.data
+import torch.nn as nn
 import torchvision
 from tensorboardX import SummaryWriter
 from torchvision import transforms as transforms
@@ -20,7 +21,7 @@ CLASSES = ('plane', 'car', 'bird', 'cat', 'deer',
 
 def main():
     parser = argparse.ArgumentParser(description="cifar-10 with PyTorch")
-    parser.add_argument('--model', default="VGG('VGG19')",
+    parser.add_argument('--model', default="vgg11()",
                         type=str, help='what model to use')
     parser.add_argument('--half', '-hf', action='store_true',
                         help='use half precision')
@@ -35,6 +36,8 @@ def main():
                         help='Use nesterov momentum')
     parser.add_argument('--epoch', default=200, type=int,
                         help='number of epochs tp train for')
+    parser.add_argument('--backforward_epoch', default=30, type=int, help='How many epochs to train using the backforward propagation method')
+    parser.add_argument('--backforward_lr', default=1.0, type=float, help='What lr to use with the backforward propagation method')
     parser.add_argument('--train_batch_size', default=128,
                         type=int, help='training batch size')
     parser.add_argument('--test_batch_size', default=512,
@@ -80,9 +83,13 @@ def main():
     solver.run()
 
 
+def hook_fn(module,grad_inputs,grad_outputs):
+    module.grad_output = grad_outputs[0]
+
 class Solver(object):
     def __init__(self, config):
         self.model = None
+        self.backforward = False
         self.args = config
         self.criterion = None
         self.optimizer = None
@@ -179,6 +186,21 @@ class Solver(object):
                 self.optimizer, milestones=self.args.lr_milestones, gamma=self.args.lr_gamma)
         self.criterion = nn.CrossEntropyLoss().to(self.device)
 
+        
+        modules = list(self.model.children())
+        i = 0
+        while i<len(modules):
+            submodules = list(modules[i].children())
+            if len(submodules) > 0:
+                modules.pop(i)
+                for k,submodule in enumerate(submodules):
+                    modules.insert(i+k,submodule)
+            else:
+                i+=1
+        for module in modules:
+            module.register_backward_hook(hook_fn)
+        self.modules = modules
+
     def get_batch_plot_idx(self):
         self.batch_plot_idx += 1
         return self.batch_plot_idx - 1
@@ -188,10 +210,6 @@ class Solver(object):
         self.model.train()
         total_loss = 0
         correct = 0
-        TP = 0
-        TN = 0
-        FP = 0
-        FN = 0
         total = 0
 
         for batch_num, (data, target) in enumerate(self.train_loader):
@@ -202,7 +220,23 @@ class Solver(object):
 
             output = self.model(data)
             loss = self.criterion(output, target)
-            loss.backward()
+            
+            if self.backforward:
+                loss.backward()
+
+                
+                inputs = torch.autograd.Variable(data,requires_grad=True)
+                for module in self.modules:
+                    module.requires_grad = True
+                    module.grad_output.requires_grad = True
+                    torch.autograd.grad(outputs=module.grad_output, inputs=inputs, grad_outputs=torch.ones_like(module.grad_output),allow_unused=True)
+
+                    try:
+                        inputs = module(inputs) 
+                    except RuntimeError:
+                        inputs = module(inputs.view(inputs.size(0), -1))
+            else:
+                loss.backward()
             self.optimizer.step()
             total_loss += loss.item()
             self.writer.add_scalar(
@@ -219,33 +253,17 @@ class Solver(object):
             true_labels = torch.nn.functional.one_hot(
                 target, num_classes=10).cpu().numpy()
 
-            # True Positive (TP): we predict a label of 1 (positive), and the true label
-            TP += np.sum(np.logical_and(pred_labels == 1, true_labels == 1))
-
-            # True Negative (TN): we predict a label of 0 (negative), and the true label is 0.
-            TN += np.sum(np.logical_and(pred_labels == 0, true_labels == 0))
-
-            # False Positive (FP): we predict a label of 1 (positive), but the true label is 0.
-            FP += np.sum(np.logical_and(pred_labels == 1, true_labels == 0))
-
-            # False Negative (FN): we predict a label of 0 (negative), but the true label is 1.
-            FN += np.sum(np.logical_and(pred_labels == 0, true_labels == 1))
-
             if self.args.progress_bar:
                 progress_bar(batch_num, len(self.train_loader), 'Loss: %.4f | Acc: %.3f%% (%d/%d)'
                              % (total_loss / (batch_num + 1), 100.0 * correct/total, correct, total))
 
-        return total_loss, correct / total, TP, TN, FP, FN
+        return total_loss, correct / total
 
     def test(self):
         print("test:")
         self.model.eval()
         total_loss = 0
         correct = 0
-        TP = 0
-        TN = 0
-        FP = 0
-        FN = 0
         total = 0
 
         with torch.no_grad():
@@ -269,27 +287,11 @@ class Solver(object):
                 true_labels = torch.nn.functional.one_hot(
                     target, num_classes=10).cpu().numpy()
 
-                # True Positive (TP): we predict a label of 1 (positive), and the true label
-                TP += np.sum(np.logical_and(pred_labels ==
-                                            1, true_labels == 1))
-
-                # True Negative (TN): we predict a label of 0 (negative), and the true label is 0.
-                TN += np.sum(np.logical_and(pred_labels ==
-                                            0, true_labels == 0))
-
-                # False Positive (FP): we predict a label of 1 (positive), but the true label is 0.
-                FP += np.sum(np.logical_and(pred_labels ==
-                                            1, true_labels == 0))
-
-                # False Negative (FN): we predict a label of 0 (negative), but the true label is 1.
-                FN += np.sum(np.logical_and(pred_labels ==
-                                            0, true_labels == 1))
-
                 if self.args.progress_bar:
                     progress_bar(batch_num, len(self.test_loader), 'Loss: %.4f | Acc: %.3f%% (%d/%d)'
                                  % (total_loss / (batch_num + 1), 100. * correct / total, correct, total))
 
-        return total_loss, correct/total, TP, TN, FP, FN
+        return total_loss, correct/total
 
     def save(self, epoch, accuracy, tag=None):
         if tag != None:
@@ -309,6 +311,14 @@ class Solver(object):
 
         accuracy = 0
         for epoch in range(1, self.args.epoch + 1):
+            if epoch < self.args.backforward_epoch:
+                self.model.requires_grad = False
+                self.backforward = True
+                for l in self.optimizer.param_groups:
+                    l['lr'] = self.args.backforward_lr
+            else:
+                self.backforward = False
+
             print("\n===> epoch: %d/%d" % (epoch, self.args.epoch))
 
             train_result = self.train()
@@ -316,93 +326,16 @@ class Solver(object):
             # Took the metrics from here: https://en.wikipedia.org/wiki/Precision_and_recall
             loss = train_result[0]
             accuracy = train_result[1]
-            TP = train_result[2]
-            TN = train_result[3]
-            FP = train_result[4]
-            FN = train_result[5]
-            TPR = TP/(TP+FN)
-            TNR = TN/(TN+FP)
-            PPV = TP/(TP+FP)
-            NPV = TN/(TN+FN)
-            FNR = FN/(FN+TP)
-            FPR = FP/(FP+TN)
-            FDR = FP/(FP+TP)
-            FOR = FN/(FN+TN)
-            TS = TP/(TP+FN+FP)
-            F1 = (2*TP)/(2*TP+FP+FN)
-            MCC = (TP*TN - FP*FN)/np.sqrt((TP+FP)*(TP+FN)*(TN+FP)*(TN+FN))
-            BM = TPR+TNR-1
-            MK = PPV+NPV-1
-
             self.writer.add_scalar("Train/Loss", loss, epoch)
             self.writer.add_scalar("Train/Accuracy", accuracy, epoch)
-            self.writer.add_scalar("Train/F1 score", F1, epoch)
-            self.writer.add_scalar("Train/Sensitivity", TPR, epoch)
-            self.writer.add_scalar("Train/Specificity", TNR, epoch)
-            self.writer.add_scalar("Train/Precision", PPV, epoch)
-            self.writer.add_scalar(
-                "Train/Negative predictive value", NPV, epoch)
-            self.writer.add_scalar("Train/Miss rate", FNR, epoch)
-            self.writer.add_scalar("Train/Fall-out", FPR, epoch)
-            self.writer.add_scalar("Train/False discovery rate ", FDR, epoch)
-            self.writer.add_scalar("Train/False omission rate ", FOR, epoch)
-            self.writer.add_scalar("Train/Threat score", TS, epoch)
-            self.writer.add_scalar("Train/TP", TP, epoch)
-            self.writer.add_scalar("Train/TN", TN, epoch)
-            self.writer.add_scalar("Train/FP", FP, epoch)
-            self.writer.add_scalar("Train/FN", FN, epoch)
-            self.writer.add_scalar(
-                "Train/Matthews correlation coefficient", MCC, epoch)
-            self.writer.add_scalar("Train/Informedness", BM, epoch)
-            self.writer.add_scalar("Train/Markedness", MK, epoch)
 
             test_result = self.test()
 
             loss = test_result[0]
             accuracy = test_result[1]
-            TP = test_result[2]
-            TN = test_result[3]
-            FP = test_result[4]
-            FN = test_result[5]
-            TPR = TP/(TP+FN)
-            TNR = TN/(TN+FP)
-            PPV = TP/(TP+FP)
-            NPV = TN/(TN+FN)
-            FNR = FN/(FN+TP)
-            FPR = FP/(FP+TN)
-            FDR = FP/(FP+TP)
-            FOR = FN/(FN+TN)
-            TS = TP/(TP+FN+FP)
-            F1 = (2*TP)/(2*TP+FP+FN)
-            MCC = (TP*TN - FP*FN)/np.sqrt((TP+FP)*(TP+FN)*(TN+FP)*(TN+FN))
-            BM = TPR+TNR-1
-            MK = PPV+NPV-1
 
             self.writer.add_scalar("Test/Loss", loss, epoch)
             self.writer.add_scalar("Test/Accuracy", accuracy, epoch)
-            self.writer.add_scalar("Test/F1 score", F1, epoch)
-            self.writer.add_scalar("Test/Sensitivity", TPR, epoch)
-            self.writer.add_scalar("Test/Specificity", TNR, epoch)
-            self.writer.add_scalar("Test/Precision", PPV, epoch)
-            self.writer.add_scalar(
-                "Test/Negative predictive value", NPV, epoch)
-            self.writer.add_scalar("Test/Miss rate", FNR, epoch)
-            self.writer.add_scalar("Test/Fall-out", FPR, epoch)
-            self.writer.add_scalar("Test/False discovery rate ", FDR, epoch)
-            self.writer.add_scalar("Test/False omission rate ", FOR, epoch)
-            self.writer.add_scalar("Test/Threat score", TS, epoch)
-            self.writer.add_scalar("Test/TP", TP, epoch)
-            self.writer.add_scalar("Test/TN", TN, epoch)
-            self.writer.add_scalar("Test/FP", FP, epoch)
-            self.writer.add_scalar("Test/FN", FN, epoch)
-            self.writer.add_scalar(
-                "Test/Matthews correlation coefficient", MCC, epoch)
-            self.writer.add_scalar("Test/Informedness", BM, epoch)
-            self.writer.add_scalar("Test/Markedness", MK, epoch)
-
-            self.writer.add_scalar("Model/Norm", self.get_model_norm(), epoch)
-            self.writer.add_scalar(
-                "Train Params/Learning rate", self.scheduler.get_lr()[0], epoch)
 
             if accuracy < test_result[1]:
                 accuracy = test_result[1]
@@ -410,11 +343,11 @@ class Solver(object):
 
             if self.args.save_model and epoch % self.args.save_interval == 0:
                 self.save(0, epoch)
-
-            if self.args.use_reduce_lr:
-                self.scheduler.step(train_result[0])
-            else:
-                self.scheduler.step(epoch)
+            if epoch >= self.args.backforward_epoch:
+                if self.args.use_reduce_lr:
+                    self.scheduler.step(train_result[0])
+                else:
+                    self.scheduler.step(epoch)
 
     def get_model_norm(self, norm_type=2):
         norm = 0.0
