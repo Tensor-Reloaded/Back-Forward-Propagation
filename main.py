@@ -36,7 +36,7 @@ def main():
                         help='Use nesterov momentum')
     parser.add_argument('--epoch', default=200, type=int,
                         help='number of epochs tp train for')
-    parser.add_argument('--backforward_epoch', default=30, type=int, help='How many epochs to train using the backforward propagation method')
+    parser.add_argument('--backforward_epoch', default=0, type=int, help='How many epochs to train using the backforward propagation method')
     parser.add_argument('--backforward_lr', default=1.0, type=float, help='What lr to use with the backforward propagation method')
     parser.add_argument('--train_batch_size', default=128,
                         type=int, help='training batch size')
@@ -84,7 +84,7 @@ def main():
 
 
 def hook_fn(module,grad_inputs,grad_outputs):
-    module.grad_output = grad_outputs[0]
+    module.grad_output = grad_outputs
 
 class Solver(object):
     def __init__(self, config):
@@ -223,24 +223,34 @@ class Solver(object):
             
             if self.backforward:
                 loss.backward()
-
                 
                 inputs = torch.autograd.Variable(data,requires_grad=True)
                 for module in self.modules:
-                    module.requires_grad = True
-                    module.grad_output.requires_grad = True
-                    torch.autograd.grad(outputs=module.grad_output, inputs=inputs, grad_outputs=torch.ones_like(module.grad_output),allow_unused=True)
+                    if not hasattr(module, 'weight'):
+                        try:
+                            inputs = module(inputs) 
+                        except RuntimeError:
+                            inputs = module(inputs.view(inputs.size(0), -1))
+                        continue
 
+                    module.requires_grad = True
+                    
                     try:
-                        inputs = module(inputs) 
+                        outputs = module(inputs) 
                     except RuntimeError:
-                        inputs = module(inputs.view(inputs.size(0), -1))
+                        outputs = module(inputs.view(inputs.size(0), -1))
+                    
+                    module.grad = torch.autograd.grad(outputs=outputs, inputs=inputs, grad_outputs=module.grad_output)
+                    self.optimizer.step()
+                    
+                    inputs = outputs
+                    self.optimizer.zero_grad()
+                    module.requires_grad = False
             else:
                 loss.backward()
-            self.optimizer.step()
+                self.optimizer.step()
             total_loss += loss.item()
-            self.writer.add_scalar(
-                "Train/Batch Loss", loss.item(), self.get_batch_plot_idx())
+            self.writer.add_scalar("Train/Batch Loss", loss.item(), self.get_batch_plot_idx())
             # second param "1" represents the dimension to be reduced
             prediction = torch.max(output, 1)
             total += target.size(0)
@@ -317,6 +327,7 @@ class Solver(object):
                 for l in self.optimizer.param_groups:
                     l['lr'] = self.args.backforward_lr
             else:
+                self.model.requires_grad = True
                 self.backforward = False
 
             print("\n===> epoch: %d/%d" % (epoch, self.args.epoch))
