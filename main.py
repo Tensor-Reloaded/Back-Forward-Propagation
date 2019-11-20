@@ -223,7 +223,6 @@ class Solver(object):
             
             if self.backforward:
                 loss.backward()
-                
                 inputs = torch.autograd.Variable(data,requires_grad=True)
                 for module in self.modules:
                     if not hasattr(module, 'weight'):
@@ -241,7 +240,11 @@ class Solver(object):
                         outputs = module(inputs.view(inputs.size(0), -1))
                     
                     module.grad = torch.autograd.grad(outputs=outputs, inputs=inputs, grad_outputs=module.grad_output)
-                    self.optimizer.step()
+                    
+                    with torch.no_grad():
+                        module.weight -= module.weight.grad * self.optimizer.param_groups[0]['lr']
+                        module.bias -= module.bias.grad * self.optimizer.param_groups[0]['lr']
+                    # self.optimizer.step()
                     
                     inputs = outputs
                     self.optimizer.zero_grad()
