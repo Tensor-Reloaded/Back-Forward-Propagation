@@ -1,4 +1,4 @@
-# python main.py --lr=0.05 --lr_milestones 30 60 90 120 150 180 210 240 270 300 --lr_gamma=0.5 --wd=0.0005 --nesterov --momentum=0.9 --model="VGG('VGG11')" --epoch=300 --train_batch_size=128
+# python main.py --model="vgg19()" --lr=0.05 --wd=0.00005 --momentum=0.9 --nesterov --epoch=300 --backforward_epoch=30 --backforward_lr=1.0 --train_batch_size=64 --test_batch_size=1024  -save --save_interval=50 --save_dir="CIFAR-10 VGG19 backforward 30 epochs"
 import argparse
 import os
 
@@ -83,8 +83,7 @@ def main():
     solver.run()
 
 
-def hook_fn(module,grad_inputs,grad_outputs):
-    module.grad_output = grad_outputs
+        
 
 class Solver(object):
     def __init__(self, config):
@@ -176,8 +175,7 @@ class Solver(object):
             self.model.load_state_dict(torch.load(self.args.load_model))
         self.model = self.model.to(self.device)
 
-        self.optimizer = optim.SGD(self.model.parameters(
-        ), lr=self.args.lr, momentum=self.args.momentum, weight_decay=self.args.wd, nesterov=self.args.nesterov)
+        self.optimizer = optim.SGD(self.model.parameters(), lr=self.args.lr, momentum=self.args.momentum, weight_decay=self.args.wd, nesterov=self.args.nesterov)
         if self.args.use_reduce_lr:
             self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(
                 self.optimizer, mode='min', factor=self.args.lr_gamma, patience=self.args.reduce_lr_patience, min_lr=self.args.reduce_lr_min_lr, verbose=True, threshold=self.args.reduce_lr_delta)
@@ -198,12 +196,17 @@ class Solver(object):
             else:
                 i+=1
         for module in modules:
-            module.register_backward_hook(hook_fn)
+            module.register_backward_hook(self.hook_fn)
         self.modules = modules
 
     def get_batch_plot_idx(self):
         self.batch_plot_idx += 1
         return self.batch_plot_idx - 1
+
+    def hook_fn(self,module,grad_inputs,grad_outputs):
+        module.grad_output = grad_outputs
+        if hasattr(module, 'weight'):
+            module.optim = self.optimizer = optim.SGD(module.parameters(), lr=self.args.lr, momentum=self.args.momentum, weight_decay=self.args.wd, nesterov=self.args.nesterov)
 
     def train(self):
         print("train:")
@@ -221,36 +224,29 @@ class Solver(object):
             output = self.model(data)
             loss = self.criterion(output, target)
             
+            loss.backward()
             if self.backforward:
-                loss.backward()
                 inputs = torch.autograd.Variable(data,requires_grad=True)
                 for module in self.modules:
-                    if not hasattr(module, 'weight'):
-                        try:
-                            inputs = module(inputs) 
-                        except RuntimeError:
-                            inputs = module(inputs.view(inputs.size(0), -1))
-                        continue
-
-                    module.requires_grad = True
-                    
                     try:
                         outputs = module(inputs) 
                     except RuntimeError:
                         outputs = module(inputs.view(inputs.size(0), -1))
+                    if not hasattr(module, 'weight'):
+                        inputs = outputs
+                        continue
                     
                     module.grad = torch.autograd.grad(outputs=outputs, inputs=inputs, grad_outputs=module.grad_output)
+                    module.optim.step()
                     
-                    with torch.no_grad():
-                        module.weight -= module.weight.grad * self.optimizer.param_groups[0]['lr']
-                        module.bias -= module.bias.grad * self.optimizer.param_groups[0]['lr']
-                    # self.optimizer.step()
-                    
-                    inputs = outputs
-                    self.optimizer.zero_grad()
+                    try:
+                        inputs = module(inputs) 
+                    except RuntimeError:
+                        inputs = module(inputs.view(inputs.size(0), -1))
+
+                    module.optim.zero_grad()
                     module.requires_grad = False
             else:
-                loss.backward()
                 self.optimizer.step()
             total_loss += loss.item()
             self.writer.add_scalar("Train/Batch Loss", loss.item(), self.get_batch_plot_idx())
@@ -324,12 +320,15 @@ class Solver(object):
 
         accuracy = 0
         for epoch in range(1, self.args.epoch + 1):
-            if epoch < self.args.backforward_epoch:
+            if epoch-1 < self.args.backforward_epoch:
                 self.model.requires_grad = False
                 self.backforward = True
                 for l in self.optimizer.param_groups:
                     l['lr'] = self.args.backforward_lr
             else:
+                if epoch-1 == self.args.backforward_epoch:
+                    for l in self.optimizer.param_groups:
+                        l['lr'] = self.args.lr
                 self.model.requires_grad = True
                 self.backforward = False
 
