@@ -318,25 +318,32 @@ class Solver(object):
         self.load_data()
         self.load_model()
 
-        accuracy = 0
+        best_accuracy = 0.0
+        if self.args.backforward_epoch > 0:
+            backward_lr_step = (self.args.backforward_epoch - self.args.lr)/self.args.backforward_epoch
         for epoch in range(1, self.args.epoch + 1):
             if epoch-1 < self.args.backforward_epoch:
+                for l in self.optimizer.param_groups:
+                    l['lr'] = self.args.backforward_lr - (backward_lr_step*(epoch-1))
+                    l.setdefault('initial_lr', l['lr'])
+                self.scheduler._last_lr = self.args.backforward_lr - (backward_lr_step*(epoch-1))
+                self.scheduler._last_lr = self.args.backforward_lr - (backward_lr_step*(epoch-1))
                 self.model.requires_grad = False
                 self.backforward = True
-                for l in self.optimizer.param_groups:
-                    l['lr'] = self.args.backforward_lr
             else:
                 if epoch-1 == self.args.backforward_epoch:
                     for l in self.optimizer.param_groups:
                         l['lr'] = self.args.lr
-                self.model.requires_grad = True
-                self.backforward = False
+                        l.setdefault('initial_lr', l['lr'])
+                    self.scheduler._last_lr = self.args.lr
+                    self.scheduler._last_lr = self.args.lr
+                    self.model.requires_grad = True
+                    self.backforward = False
 
             print("\n===> epoch: %d/%d" % (epoch, self.args.epoch))
 
             train_result = self.train()
 
-            # Took the metrics from here: https://en.wikipedia.org/wiki/Precision_and_recall
             loss = train_result[0]
             accuracy = train_result[1]
             self.writer.add_scalar("Train/Loss", loss, epoch)
@@ -350,9 +357,15 @@ class Solver(object):
             self.writer.add_scalar("Test/Loss", loss, epoch)
             self.writer.add_scalar("Test/Accuracy", accuracy, epoch)
 
-            if accuracy < test_result[1]:
-                accuracy = test_result[1]
+            
+            self.writer.add_scalar("Model/Norm", self.get_model_norm(), epoch)
+            self.writer.add_scalar("Train Params/Learning rate", self.optimizer.param_groups[0]['lr'], epoch)
+
+            if best_accuracy < test_result[1]:
+                best_accuracy = test_result[1]
                 self.save(epoch, accuracy)
+                print("===> BEST ACC. PERFORMANCE: %.3f%%" % (best_accuracy * 100))
+
 
             if self.args.save_model and epoch % self.args.save_interval == 0:
                 self.save(0, epoch)
@@ -360,7 +373,7 @@ class Solver(object):
                 if self.args.use_reduce_lr:
                     self.scheduler.step(train_result[0])
                 else:
-                    self.scheduler.step(epoch)
+                    self.scheduler.step()
 
     def get_model_norm(self, norm_type=2):
         norm = 0.0
