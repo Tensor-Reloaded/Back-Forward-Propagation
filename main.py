@@ -206,7 +206,7 @@ class Solver(object):
     def hook_fn(self,module,grad_inputs,grad_outputs):
         module.grad_output = grad_outputs
         if hasattr(module, 'weight'):
-            module.optim = self.optimizer = optim.SGD(module.parameters(), lr=self.args.lr, momentum=self.args.momentum, weight_decay=self.args.wd, nesterov=self.args.nesterov)
+            module.optim = optim.SGD(module.parameters(), lr=self.args.backforward_lr, momentum=self.args.momentum, weight_decay=self.args.wd, nesterov=self.args.nesterov)
 
     def train(self):
         print("train:")
