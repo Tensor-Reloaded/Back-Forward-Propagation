@@ -207,6 +207,7 @@ class Solver(object):
         module.grad_output = grad_outputs
         if hasattr(module, 'weight'):
             module.optim = optim.SGD(module.parameters(), lr=self.args.backforward_lr, momentum=self.args.momentum, weight_decay=self.args.wd, nesterov=self.args.nesterov)
+            module.requires_grad = False
 
     def train(self):
         print("train:")
@@ -245,7 +246,6 @@ class Solver(object):
                         inputs = module(inputs.view(inputs.size(0), -1))
 
                     module.optim.zero_grad()
-                    module.requires_grad = False
             else:
                 self.optimizer.step()
             total_loss += loss.item()
