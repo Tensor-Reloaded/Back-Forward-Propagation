@@ -1,3 +1,5 @@
+#python main.py --model="PreResNet(56)" --lr=0.05 --wd=0.00005 --momentum=0.9 --nesterov --epoch=270 --backforward_epoch=30 --backforward_lr=0.05 --train_batch_size=128 --test_batch_size=1024  -save --save_interval=50 --save_dir="CIFAR-10 PreResNet56 backforward 30 epochs" --backforward_train_batch_size=128 --seed=2525 -pb
+
 import sys
 import argparse
 import pickle
