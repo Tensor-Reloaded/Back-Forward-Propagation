@@ -5,4 +5,4 @@ from .LeNet import *
 from .DenseNet import *
 from .GoogleNet import *
 from .WideResNet import *
-from .PreResNet import *
+from .PreResNet import PreResNet

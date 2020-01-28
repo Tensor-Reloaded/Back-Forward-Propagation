@@ -1,11 +1,8 @@
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
-*.pyc
 *$py.class
-**.pyc
-**/*.pyc
-**/__pycache__/
+
 
 **/events.out.tfevents.*
 # C extensions
