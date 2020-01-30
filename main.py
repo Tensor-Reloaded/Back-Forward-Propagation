@@ -57,10 +57,18 @@ def yaml_dict_to_params(config):
 
 def main():
     parser = argparse.ArgumentParser(description="cifar-10 with PyTorch")
-    parser.add_argument('--config_path', default="sample.yaml",
+    parser.add_argument('--config_path', default=None,
                         type=str, help='what config file to use')
 
-    config_path = parser.parse_args().config_path
+    config_path = parser.parse_known_args()[0].config_path
+    if config_path is None:
+        config_path = "sample.yaml"
+        if len(sys.argv) == 2:
+            config_path = sys.argv[1]
+
+    if not os.path.isfile("experiments/"+config_path) and not config_path.endswith(".yaml"):
+        config_path+='.yaml'
+
     config = load(open("experiments/"+config_path, "r"), Loader)
     save_config_path = "runs/" + config["save_dir"]
     os.makedirs(save_config_path, exist_ok=True)
@@ -126,7 +134,7 @@ class Solver(object):
 
         if self.args.train_subset == None:
             self.train_loader = torch.utils.data.DataLoader(
-                dataset=self.train_set, batch_size=self.args.train_batch_size, shuffle=True)
+                dataset=self.train_set, batch_size=self.args.train_batch_size, shuffle=True, drop_last=True)
         else:
             filename = "subset_indices/subset_balanced_{}_{}.data".format(
                 self.dataset, self.args.train_subset)
@@ -201,7 +209,54 @@ class Solver(object):
         self.batch_plot_idx += 1
         return self.batch_plot_idx - 1
 
-    def hook_fn(self,module,grad_inputs,grad_outputs):
+    def forward_hook_fn(self,module, X, y):
+        if not self.model.training or not self.backforward or not hasattr(module,'weight') or not hasattr(module,'grad_output') or module.grad_output is None:
+            return
+
+        module.forward_handle.remove()
+        module.backward_handle.remove()
+
+        module.weight.grad.zero_()
+        y.backward(module.grad_output,retain_graph=True)
+        
+        group = self.optimizer.param_groups[0]
+        weight_decay = group['weight_decay']
+        momentum = group['momentum']
+        dampening = group['dampening']
+        nesterov = group['nesterov']
+
+        for p in module.parameters():
+            if p.grad is None:
+                continue
+            d_p = p.grad.data
+            if weight_decay != 0:
+                d_p = d_p.add(weight_decay, p.data)
+            if momentum != 0:
+                param_state = self.optimizer.state[p]
+                if 'momentum_buffer' not in param_state:
+                    buf = param_state['momentum_buffer'] = torch.clone(d_p).detach()
+                else:
+                    buf = param_state['momentum_buffer']
+                    buf.mul_(momentum).add_(1 - dampening, d_p)
+                if nesterov:
+                    d_p = d_p.add(momentum, buf)
+                else:
+                    d_p = buf
+
+            p.data.add_(-group['lr'], d_p)
+        
+        y = module(*X)
+        module.grad_output = None
+
+        module.forward_handle = module.register_forward_hook(self.forward_hook_fn)
+        module.backward_handle = module.register_backward_hook(self.backward_hook_fn)
+
+        return y
+
+    def backward_hook_fn(self,module,grad_inputs,grad_outputs):
+        if not self.model.training or not self.backforward:
+            return
+
         module.grad_input = grad_inputs
         module.grad_output = grad_outputs
 
@@ -228,7 +283,8 @@ class Solver(object):
         remove_sequential(backforward_solver.model,modules)
 
         for module in modules:
-            module.register_backward_hook(self.hook_fn)
+            module.forward_handle = module.register_forward_hook(backforward_solver.forward_hook_fn)
+            module.backward_handle = module.register_backward_hook(backforward_solver.backward_hook_fn)
         backforward_solver.modules = modules
 
         backforward_solver.run()
@@ -251,30 +307,10 @@ class Solver(object):
                 with amp.scale_loss(loss, self.optimizer) as scaled_loss:
                     scaled_loss.backward()
             else:
-                loss.backward()
-
+                loss.backward(retain_graph=self.backforward)
+            
             if self.backforward:
-                X = torch.autograd.Variable(data,requires_grad=False)
-                self.optimizer.zero_grad()
-                for i,module in enumerate(self.modules):
-                    if i > 0:
-                        X = torch.autograd.Variable(X,requires_grad=False)
-                        try:
-                            y = module(X)
-                        except:
-                            y = module(X.view(X.size(0), -1))
-                        if not hasattr(module,'weight'):
-                            X = y
-                            continue
-                        module.weight.grad.zero_()
-                        y.backward(module.grad_output[0].data)
-
-                    self.optimizer.step()
-                    module.weight.grad.requires_grad = False
-                    try:
-                        X = module(X)
-                    except:
-                        X = module(X.view(X.size(0), -1))
+                self.model(data)
             else:
                 self.optimizer.step()
 

@@ -3,10 +3,10 @@ dataset: 'CIFAR-10'
 half: False
 mixpo: 1
 load_model: ""
-lr: 0.01
-wd: 0.0
-momentum: 0.0
-nesterov: False
+lr: 0.05
+wd: 0.00005
+momentum: 0.9
+nesterov: True
 epoch: 200
 train_batch_size: 128
 test_batch_size: 512
@@ -30,3 +30,5 @@ cuda: True
 cuda_device: 0
 seed:
 progress_bar: False
+
+backforward_epochs: False

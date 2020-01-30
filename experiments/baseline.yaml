@@ -1,15 +1,15 @@
-model: "VGG19()"
+model: "PreResNet(110)"
 dataset: "CIFAR-10"
 half: False
 mixpo: 1
 load_model: ""
-lr: 0.01
-wd: 0.0
-momentum: 0.0
-nesterov: False
+lr: 0.05
+wd: 0.00005
+momentum: 0.9
+nesterov: True
 epoch: 200
 train_batch_size: 128
-test_batch_size: 512
+test_batch_size: 1024
 train_subset:
 initialization: 0
 initialization_batch_norm: False
@@ -32,5 +32,3 @@ seed:
 progress_bar: True
 
 backforward_epochs: False
-backforward_lr: 1.0
-backforward_train_batch_size: 256

@@ -1,25 +1,56 @@
-from __future__ import absolute_import
-import math
 import torch.nn as nn
+import math
 
-__all__ = ['PreResNet']
+def conv3x3(in_planes, out_planes, stride=1):
+    "3x3 convolution with padding"
+    return nn.Conv2d(in_planes, out_planes, kernel_size=3, stride=stride,
+                     padding=1, bias=False)
 
-"""
-preactivation resnet with bottleneck design.
-"""
+
+class BasicBlock(nn.Module):
+    expansion = 1
+
+    def __init__(self, inplanes, planes, stride=1, downsample=None):
+        super(BasicBlock, self).__init__()
+        self.bn1 = nn.BatchNorm2d(inplanes)
+        self.relu = nn.ReLU(inplace=True)
+        self.conv1 = conv3x3(inplanes, planes, stride)
+        self.bn2 = nn.BatchNorm2d(planes)
+        self.conv2 = conv3x3(planes, planes)
+        self.downsample = downsample
+        self.stride = stride
+
+    def forward(self, x):
+        residual = x
+
+        out = self.bn1(x)
+        out = self.relu(out)
+        out = self.conv1(out)
+
+        out = self.bn2(out)
+        out = self.relu(out)
+        out = self.conv2(out)
+
+        if self.downsample is not None:
+            residual = self.downsample(x)
+
+        out += residual
+
+        return out
+
 
 class Bottleneck(nn.Module):
     expansion = 4
 
-    def __init__(self, inplanes, planes, cfg, stride=1, downsample=None):
+    def __init__(self, inplanes, planes, stride=1, downsample=None):
         super(Bottleneck, self).__init__()
         self.bn1 = nn.BatchNorm2d(inplanes)
-        self.conv1 = nn.Conv2d(cfg[0], cfg[1], kernel_size=1, bias=False)
-        self.bn2 = nn.BatchNorm2d(cfg[1])
-        self.conv2 = nn.Conv2d(cfg[1], cfg[2], kernel_size=3, stride=stride,
+        self.conv1 = nn.Conv2d(inplanes, planes, kernel_size=1, bias=False)
+        self.bn2 = nn.BatchNorm2d(planes)
+        self.conv2 = nn.Conv2d(planes, planes, kernel_size=3, stride=stride,
                                padding=1, bias=False)
-        self.bn3 = nn.BatchNorm2d(cfg[2])
-        self.conv3 = nn.Conv2d(cfg[2], planes * 4, kernel_size=1, bias=False)
+        self.bn3 = nn.BatchNorm2d(planes)
+        self.conv3 = nn.Conv2d(planes, planes * 4, kernel_size=1, bias=False)
         self.relu = nn.ReLU(inplace=True)
         self.downsample = downsample
         self.stride = stride
@@ -46,44 +77,43 @@ class Bottleneck(nn.Module):
 
         return out
 
+
 class PreResNet(nn.Module):
-    def __init__(self, depth=164, dataset='cifar10', cfg=None):
+
+    def __init__(self, depth, num_classes=10, block_name='BasicBlock'):
         super(PreResNet, self).__init__()
-        assert (depth - 2) % 9 == 0, 'depth should be 9n+2'
-
-        n = (depth - 2) // 9
-        block = Bottleneck
-
-        if cfg is None:
-            # Construct config variable.
-            cfg = [[16, 16, 16], [64, 16, 16]*(n-1), [64, 32, 32], [128, 32, 32]*(n-1), [128, 64, 64], [256, 64, 64]*(n-1), [256]]
-            cfg = [item for sub_list in cfg for item in sub_list]
+        # Model type specifies number of layers for CIFAR-10 model
+        if block_name.lower() == 'basicblock':
+            assert (depth - 2) % 6 == 0, 'When use basicblock, depth should be 6n+2, e.g. 20, 32, 44, 56, 110, 1202'
+            n = (depth - 2) // 6
+            block = BasicBlock
+        elif block_name.lower() == 'bottleneck':
+            assert (depth - 2) % 9 == 0, 'When use bottleneck, depth should be 9n+2, e.g. 20, 29, 47, 56, 110, 1199'
+            n = (depth - 2) // 9
+            block = Bottleneck
+        else:
+            raise ValueError('block_name shoule be Basicblock or Bottleneck')
 
         self.inplanes = 16
-
         self.conv1 = nn.Conv2d(3, 16, kernel_size=3, padding=1,
                                bias=False)
-        self.layer1 = self._make_layer(block, 16, n, cfg = cfg[0:3*n])
-        self.layer2 = self._make_layer(block, 32, n, cfg = cfg[3*n:6*n], stride=2)
-        self.layer3 = self._make_layer(block, 64, n, cfg = cfg[6*n:9*n], stride=2)
+        self.layer1 = self._make_layer(block, 16, n)
+        self.layer2 = self._make_layer(block, 32, n, stride=2)
+        self.layer3 = self._make_layer(block, 64, n, stride=2)
         self.bn = nn.BatchNorm2d(64 * block.expansion)
         self.relu = nn.ReLU(inplace=True)
         self.avgpool = nn.AvgPool2d(8)
-
-        if dataset == 'cifar10':
-            self.fc = nn.Linear(cfg[-1], 10)
-        elif dataset == 'cifar100':
-            self.fc = nn.Linear(cfg[-1], 100)
+        self.fc = nn.Linear(64 * block.expansion, num_classes)
 
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
                 n = m.kernel_size[0] * m.kernel_size[1] * m.out_channels
                 m.weight.data.normal_(0, math.sqrt(2. / n))
             elif isinstance(m, nn.BatchNorm2d):
-                m.weight.data.fill_(0.5)
+                m.weight.data.fill_(1)
                 m.bias.data.zero_()
 
-    def _make_layer(self, block, planes, blocks, cfg, stride=1):
+    def _make_layer(self, block, planes, blocks, stride=1):
         downsample = None
         if stride != 1 or self.inplanes != planes * block.expansion:
             downsample = nn.Sequential(
@@ -92,10 +122,10 @@ class PreResNet(nn.Module):
             )
 
         layers = []
-        layers.append(block(self.inplanes, planes, cfg[0:3], stride, downsample))
+        layers.append(block(self.inplanes, planes, stride, downsample))
         self.inplanes = planes * block.expansion
         for i in range(1, blocks):
-            layers.append(block(self.inplanes, planes, cfg[3*i: 3*(i+1)]))
+            layers.append(block(self.inplanes, planes))
 
         return nn.Sequential(*layers)
 
@@ -113,3 +143,10 @@ class PreResNet(nn.Module):
         x = self.fc(x)
 
         return x
+
+
+def preresnet(**kwargs):
+    """
+    Constructs a ResNet model.
+    """
+    return PreResNet(**kwargs)
