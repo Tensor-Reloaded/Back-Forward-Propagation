@@ -217,6 +217,8 @@ class Solver(object):
         module.backward_handle.remove()
 
         module.weight.grad.zero_()
+        X = tuple(map(torch.Tensor.detach,X))
+        y = module(*X)
         y.backward(module.grad_output,retain_graph=True)
         
         group = self.optimizer.param_groups[0]
