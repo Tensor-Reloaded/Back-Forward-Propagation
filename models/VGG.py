@@ -9,15 +9,23 @@ cfg = {
 }
 
 
+class Reshaper(nn.Module):
+    def __init__(self):
+        super(Reshaper,self).__init__()
+
+    def forward(self,x):
+        return x.view(x.size(0),-1)
+
 class VGG(nn.Module):
     def __init__(self, vgg_name):
         super(VGG, self).__init__()
         self.features = self._make_layers(cfg[vgg_name])
         self.classifier = nn.Linear(512, 10)
+        self.reshaper = Reshaper()
 
     def forward(self, x):
         out = self.features(x)
-        out = out.view(out.size(0), -1)
+        out = self.reshaper(out)
         out = self.classifier(out)
         return out
 

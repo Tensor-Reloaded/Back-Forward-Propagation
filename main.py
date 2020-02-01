@@ -217,9 +217,15 @@ class Solver(object):
         module.backward_handle.remove()
 
         module.weight.grad.zero_()
-        X = tuple(map(torch.Tensor.detach,X))
-        y = module(*X)
-        y.backward(module.grad_output,retain_graph=True)
+
+        # Forward till the end
+        auxX = tuple(map(torch.Tensor.detach,X))
+        auxX = module(*X)
+        for i in range(module.idx+1,len(self.modules)):
+            auxX = self.modules[i](auxX)
+        
+        loss = self.criterion(auxX, target)        
+        loss.backward()
         
         group = self.optimizer.param_groups[0]
         weight_decay = group['weight_decay']
@@ -284,9 +290,10 @@ class Solver(object):
                     modules.append(layer)
         remove_sequential(backforward_solver.model,modules)
 
-        for module in modules:
+        for i,module in enumerate(modules):
             module.forward_handle = module.register_forward_hook(backforward_solver.forward_hook_fn)
             module.backward_handle = module.register_backward_hook(backforward_solver.backward_hook_fn)
+            module.idx = i
         backforward_solver.modules = modules
 
         backforward_solver.run()
@@ -302,7 +309,6 @@ class Solver(object):
         for batch_num, (data, target) in enumerate(self.train_loader):
             data, target = data.to(self.device), target.to(self.device)
             self.optimizer.zero_grad()
-
             output = self.model(data)
             loss = self.criterion(output, target)
             if self.args.half:
@@ -312,6 +318,7 @@ class Solver(object):
                 loss.backward(retain_graph=self.backforward)
             
             if self.backforward:
+                self.target = target
                 self.model(data)
             else:
                 self.optimizer.step()
