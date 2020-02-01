@@ -213,8 +213,9 @@ class Solver(object):
         if not self.model.training or not self.backforward or not hasattr(module,'weight') or not hasattr(module,'grad_output') or module.grad_output is None:
             return
 
-        module.forward_handle.remove()
-        module.backward_handle.remove()
+        for i in range(module.idx,len(self.modules)):
+            self.modules[i].forward_handle.remove()
+            self.modules[i].backward_handle.remove()
 
         module.weight.grad.zero_()
 
@@ -222,8 +223,9 @@ class Solver(object):
         X = tuple(map(torch.Tensor.detach,X))
         auxX = module(*X)
         for i in range(module.idx+1,len(self.modules)):
+            print(self.modules[i])
             auxX = self.modules[i](auxX)
-        
+
         loss = self.criterion(auxX, target)        
         loss.backward()
         
@@ -256,8 +258,9 @@ class Solver(object):
         y = module(*X)
         module.grad_output = None
 
-        module.forward_handle = module.register_forward_hook(self.forward_hook_fn)
-        module.backward_handle = module.register_backward_hook(self.backward_hook_fn)
+        for i in range(module.idx,len(self.modules)):
+            self.modules[i].forward_handle = module.register_forward_hook(self.forward_hook_fn)
+            self.modules[i].backward_handle = module.register_backward_hook(self.backward_hook_fn)
 
         return y
 
