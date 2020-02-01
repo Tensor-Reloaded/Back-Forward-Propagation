@@ -219,14 +219,12 @@ class Solver(object):
 
         module.weight.grad.zero_()
 
-        # Forward till the end
         X = tuple(map(torch.Tensor.detach,X))
         auxX = module(*X)
         for i in range(module.idx+1,len(self.modules)):
-            print(self.modules[i])
             auxX = self.modules[i](auxX)
 
-        loss = self.criterion(auxX, target)        
+        loss = self.criterion(auxX, self.target)        
         loss.backward()
         
         group = self.optimizer.param_groups[0]
@@ -259,8 +257,8 @@ class Solver(object):
         module.grad_output = None
 
         for i in range(module.idx,len(self.modules)):
-            self.modules[i].forward_handle = module.register_forward_hook(self.forward_hook_fn)
-            self.modules[i].backward_handle = module.register_backward_hook(self.backward_hook_fn)
+            self.modules[i].forward_handle = self.modules[i].register_forward_hook(self.forward_hook_fn)
+            self.modules[i].backward_handle = self.modules[i].register_backward_hook(self.backward_hook_fn)
 
         return y
 
@@ -287,9 +285,9 @@ class Solver(object):
         modules = []
         def remove_sequential(network, modules):
             for layer in network.children():
-                if type(layer) == nn.Sequential:
+                if len(list(layer.children())) > 0:
                     remove_sequential(layer,modules)
-                if list(layer.children()) == []:
+                if len(list(layer.children())) == 0:
                     modules.append(layer)
         remove_sequential(backforward_solver.model,modules)
 
@@ -297,6 +295,7 @@ class Solver(object):
             module.forward_handle = module.register_forward_hook(backforward_solver.forward_hook_fn)
             module.backward_handle = module.register_backward_hook(backforward_solver.backward_hook_fn)
             module.idx = i
+
         backforward_solver.modules = modules
 
         backforward_solver.run()

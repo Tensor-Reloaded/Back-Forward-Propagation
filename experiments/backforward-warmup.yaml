@@ -1,4 +1,4 @@
-model: "PreResNet(110)"
+model: "VGG19()"
 dataset: "CIFAR-10"
 half: False
 mixpo: 180

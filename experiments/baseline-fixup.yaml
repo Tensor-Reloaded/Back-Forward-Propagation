@@ -1,4 +1,4 @@
-model: "fixup_resnet110()"
+model: "VGG19()"
 dataset: "CIFAR-10"
 half: False
 mixpo: 1
