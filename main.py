@@ -225,7 +225,11 @@ class Solver(object):
             auxX = self.modules[i](auxX)
 
         loss = self.criterion(auxX, self.target)        
-        loss.backward()
+        if self.args.half:
+            with amp.scale_loss(loss, self.optimizer) as scaled_loss:
+                scaled_loss.backward()
+        else:
+            loss.backward()
         
         group = self.optimizer.param_groups[0]
         weight_decay = group['weight_decay']
@@ -317,7 +321,7 @@ class Solver(object):
                 with amp.scale_loss(loss, self.optimizer) as scaled_loss:
                     scaled_loss.backward()
             else:
-                loss.backward(retain_graph=self.backforward)
+                loss.backward()
             
             if self.backforward:
                 self.target = target
