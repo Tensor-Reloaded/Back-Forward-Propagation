@@ -219,7 +219,7 @@ class Solver(object):
         module.weight.grad.zero_()
 
         # Forward till the end
-        auxX = tuple(map(torch.Tensor.detach,X))
+        X = tuple(map(torch.Tensor.detach,X))
         auxX = module(*X)
         for i in range(module.idx+1,len(self.modules)):
             auxX = self.modules[i](auxX)
