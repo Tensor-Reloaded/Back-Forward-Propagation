@@ -5,9 +5,9 @@ mixpo: 1
 load_model: ""
 lr: 0.05
 wd: 0.0001
-momentum: 0.9
-nesterov: True
-epoch: 180
+momentum: 0.0
+nesterov: False
+epoch: 1
 train_batch_size: 128
 test_batch_size: 1024
 train_subset:
@@ -15,7 +15,7 @@ initialization: 0
 initialization_batch_norm: False
 save_model: False
 save_interval: 5
-save_dir: "Backward warmup"
+save_dir: "Backforward no momentum"
 lr_milestones: [30, 60, 90, 120,150]
 use_reduce_lr: False
 reduce_lr_patience: 20
@@ -31,6 +31,6 @@ cuda_device: 0
 seed:
 progress_bar: True
 
-backforward_epochs: 2
-backforward_lr: 0.005
-backforward_train_batch_size: 32
+backforward_epochs: 200
+backforward_lr: 0.05
+backforward_train_batch_size: 128

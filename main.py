@@ -259,6 +259,7 @@ class Solver(object):
         
         y = module(*X)
         module.grad_output = None
+        module.weight.grad.zero_()
 
         for i in range(module.idx,len(self.modules)):
             self.modules[i].forward_handle = self.modules[i].register_forward_hook(self.forward_hook_fn)
