@@ -242,20 +242,20 @@ class Solver(object):
                 continue
             d_p = p.grad.data
             if weight_decay != 0:
-                d_p = d_p.add(weight_decay, p.data)
+                d_p = d_p.add(p.data, alpha=weight_decay)
             if momentum != 0:
                 param_state = self.optimizer.state[p]
                 if 'momentum_buffer' not in param_state:
                     buf = param_state['momentum_buffer'] = torch.clone(d_p).detach()
                 else:
                     buf = param_state['momentum_buffer']
-                    buf.mul_(momentum).add_(1 - dampening, d_p)
+                    buf.mul_(momentum).add_(d_p, alpha=1 - dampening)
                 if nesterov:
-                    d_p = d_p.add(momentum, buf)
+                    d_p = d_p.add(buf, alpha=momentum)
                 else:
                     d_p = buf
 
-            p.data.add_(-group['lr'], d_p)
+            p.data.add_(d_p, alpha=-group['lr'])
         
         y = module(*X)
         module.grad_output = None
@@ -432,7 +432,7 @@ class Solver(object):
 
         print("===> BEST ACC. PERFORMANCE: %.3f%%" % (best_accuracy * 100))
         files = os.listdir(self.save_dir)
-        paths = [os.path.join(self.save_dir, basename) for basename in files if "_0_" not in basename]
+        paths = [os.path.join(self.save_dir, basename) for basename in files if "_0" not in basename]
         if len(paths) > 0:
             src = max(paths, key=os.path.getctime)
             copyfile(src, os.path.join("runs", self.args.save_dir, os.path.basename(src)))
