@@ -210,37 +210,79 @@ class Solver(object):
         return self.batch_plot_idx - 1
 
     def forward_hook_fn(self,module, X, y):
-        if not self.model.training or not self.backforward or not hasattr(module,'weight') or not hasattr(module,'grad_output') or module.grad_output is None:
+        if not self.model.training or not self.backforward or not module.hooks_enabled or not hasattr(module,'weight'):
             return
 
+        def zero_grad(module):
+            for p in module.parameters():
+                if p.grad is not None:
+                    p.grad.detach_()
+                    p.grad.zero_()
+
+        def norm(module):
+            if isinstance(module, torch.Tensor):
+                n = torch.norm(module).item()
+            else:
+                n = sum([torch.norm(p).item() for p in module.parameters()])
+            assert not math.isnan(n)
+            return n
+
+        def freeze(module):
+            if isinstance(module, list):
+                for m in module:
+                    freeze(m)
+            else:
+                for p in module.parameters():
+                    p.requires_grad = False
+
+        def unfreeze(module):
+            if isinstance(module, list):
+                for m in module:
+                    unfreeze(m)
+            else:
+                for p in module.parameters():
+                    p.requires_grad = True
+
         for i in range(module.idx,len(self.modules)):
-            self.modules[i].forward_handle.remove()
-            self.modules[i].backward_handle.remove()
+            self.modules[i].hooks_enabled = False
+            zero_grad(self.modules[i])
 
-        module.weight.grad.zero_()
+        unfreeze(module)
 
-        X = tuple(map(torch.Tensor.detach,X))
+        # print('i =', module.idx)
+
+        X = [x.detach() for x in X]
         auxX = module(*X)
         for i in range(module.idx+1,len(self.modules)):
             auxX = self.modules[i](auxX)
 
-        loss = self.criterion(auxX, self.target)        
+        loss = self.criterion(auxX, self.target)
         if self.args.half:
             with amp.scale_loss(loss, self.optimizer) as scaled_loss:
                 scaled_loss.backward()
         else:
             loss.backward()
-        
+
+        # print('loss =', loss.item())
+
+        # self.optimizer.step()
+
         group = self.optimizer.param_groups[0]
         weight_decay = group['weight_decay']
         momentum = group['momentum']
         dampening = group['dampening']
         nesterov = group['nesterov']
 
+
+        # print('norm(module_before) =', norm(module))
+
+        nn.utils.clip_grad_norm_(module.parameters(), 7)
+
         for p in module.parameters():
             if p.grad is None:
                 continue
             d_p = p.grad.data
+            # print('norm(d_p after) =', norm(d_p))
             if weight_decay != 0:
                 d_p = d_p.add(p.data, alpha=weight_decay)
             if momentum != 0:
@@ -249,21 +291,27 @@ class Solver(object):
                     buf = param_state['momentum_buffer'] = torch.clone(d_p).detach()
                 else:
                     buf = param_state['momentum_buffer']
+                    # print('norm(mom_buf_before) =', torch.norm(buf).item())
                     buf.mul_(momentum).add_(d_p, alpha=1 - dampening)
+                    # print('norm(mom_buf_after) =', torch.norm(buf).item() )
                 if nesterov:
                     d_p = d_p.add(buf, alpha=momentum)
                 else:
                     d_p = buf
 
             p.data.add_(d_p, alpha=-group['lr'])
-        
-        y = module(*X)
-        module.grad_output = None
-        module.weight.grad.zero_()
+
+        # print('norm(module_after) =', norm(module))
+        print('norm(model) =', norm(self.model))
+
+        with torch.no_grad():
+            y = module(*X)
+
+        freeze(module)
 
         for i in range(module.idx,len(self.modules)):
-            self.modules[i].forward_handle = self.modules[i].register_forward_hook(self.forward_hook_fn)
-            self.modules[i].backward_handle = self.modules[i].register_backward_hook(self.backward_hook_fn)
+            self.modules[i].hooks_enabled = True
+            zero_grad(self.modules[i])
 
         return y
 
@@ -271,8 +319,8 @@ class Solver(object):
         if not self.model.training or not self.backforward:
             return
 
-        module.grad_input = grad_inputs
-        module.grad_output = grad_outputs
+        # module.grad_input = grad_inputs
+        # module.grad_output = grad_outputs
 
     def perform_backforward(self):
         backforward_params = copy.deepcopy(self.args)
@@ -300,6 +348,7 @@ class Solver(object):
             module.forward_handle = module.register_forward_hook(backforward_solver.forward_hook_fn)
             module.backward_handle = module.register_backward_hook(backforward_solver.backward_hook_fn)
             module.idx = i
+            module.hooks_enabled = True
 
         backforward_solver.modules = modules
 
@@ -313,25 +362,29 @@ class Solver(object):
         correct = 0
         total = 0
 
+        if self.backforward:
+            for p in self.model.parameters():
+                p.requires_grad = False
+
         for batch_num, (data, target) in enumerate(self.train_loader):
             data, target = data.to(self.device), target.to(self.device)
-            self.optimizer.zero_grad()
-            output = self.model(data)
-            loss = self.criterion(output, target)
-            if self.args.half:
-                with amp.scale_loss(loss, self.optimizer) as scaled_loss:
-                    scaled_loss.backward()
-            else:
-                loss.backward()
-            
+
             if self.backforward:
                 self.target = target
-                self.model(data)
+                output = self.model(data)
             else:
+                self.optimizer.zero_grad()
+                output = self.model(data)
+                loss = self.criterion(output, target)
+                if self.args.half:
+                    with amp.scale_loss(loss, self.optimizer) as scaled_loss:
+                        scaled_loss.backward()
+                else:
+                    loss.backward()
                 self.optimizer.step()
 
-            total_loss += loss.item()
-            self.writer.add_scalar("Train/Batch Loss", loss.item(), self.get_batch_plot_idx())
+                total_loss += loss.item()
+                self.writer.add_scalar("Train/Batch Loss", loss.item(), self.get_batch_plot_idx())
 
             prediction = torch.max(output, 1)
             total += target.size(0)
