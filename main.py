@@ -302,7 +302,7 @@ class Solver(object):
             p.data.add_(d_p, alpha=-group['lr'])
 
         # print('norm(module_after) =', norm(module))
-        print('norm(model) =', norm(self.model))
+        # print('norm(model) =', norm(self.model))
 
         with torch.no_grad():
             y = module(*X)
