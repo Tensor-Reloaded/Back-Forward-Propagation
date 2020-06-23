@@ -9,7 +9,7 @@ momentum: 0.9
 nesterov: True
 epoch: 200
 train_batch_size: 128
-test_batch_size: 1024
+test_batch_size: 128
 train_subset:
 initialization: 0
 initialization_batch_norm: False
