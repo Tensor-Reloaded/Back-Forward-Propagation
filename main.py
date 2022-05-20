@@ -383,6 +383,14 @@ class Solver(object):
     def train(self):
         print("train:")
         self.model.train()
+        
+        # self.model.fc1.weight.requires_grad = False
+        # self.model.fc1.bias.requires_grad = False
+        
+        # self.model.fc2.weight.requires_grad = False
+        # self.model.fc2.bias.requires_grad = False
+        
+        
         total_loss = 0
         correct = 0
         total = 0
@@ -407,130 +415,30 @@ class Solver(object):
             #     accumulation_target.append(target)
 
 
-            
-            def sam_closure():
-                self.disable_bn()
-                while True: 
-                    with autocast(enabled=self.args.half):
-                        output = self.model(data)
-                        if self.output_transformations is not None:
-                            output = self.output_transformations(output)
-                        
-                        if hasattr(self.args.model, 'returns_loss') and self.args.model.returns_loss:
-                            loss = output
-                        else:
-                            loss = self.criterion(output, target)
-                        loss = loss / self.args.train_dataset.update_every
 
-                    if self.args.optimizer.grad_penalty is not None and self.args.optimizer.grad_penalty > 0.0:
-                        # Creates gradients
-                        scaled_grad_params = torch.autograd.grad(outputs=self.scaler.scale(loss), inputs=self.model.parameters(), create_graph=True)
-
-                        # Creates unscaled grad_params before computing the penalty. scaled_grad_params are
-                        # not owned by any optimizer, so ordinary division is used instead of scaler.unscale_:
-                        inv_scale = 1. / self.scaler.get_scale()
-                        grad_params = [p * inv_scale for p in scaled_grad_params]
-
-                        # Computes the penalty term and adds it to the loss
-                        with autocast():
-                            grad_norm = 0
-                            for grad in grad_params:
-                                grad_norm += grad.pow(2).sum()
-                            grad_norm = grad_norm.sqrt()
-                            loss = loss + (grad_norm * self.args.optimizer.grad_penalty)
-
-                    self.scaler.scale(loss).backward()
-
-                    if self.args.optimizer.batch_replay:
-                        found_inf = False
-                        for _, param in self.model.named_parameters():
-                            if param.grad.isnan().any() or param.grad.isinf().any():
-                                found_inf = True
-                                break
-                        if found_inf:
-                            self.scaler.update()
-                            self.optimizer.zero_grad()  # (set_to_none=True)
-                            self.model.zero_grad(set_to_none=True)
-                            if type(self.args.optimizer.batch_replay) == int or type(
-                                    self.args.optimizer.batch_replay) == float:
-                                self.args.optimizer.batch_replay -= 1
-                        else:
-                            break
-                    else:
-                        break
-
-                if self.train_batch_plot_idx % self.args.train_dataset.update_every == 0:
-                    self.scaler.unscale_(self.optimizer)
-
-                    if self.args.optimizer.max_norm > 0.0:
-                        torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.args.optimizer.max_norm)
-                    self.enable_bn()
-
-            while True:
+            backforward=Trye
+            first_loss = None
+            for l in [self.model.fc2, self.model.fc1, None]:
+                if backforward and l is not None:
+                    l.weight.requires_grad = False
+                    l.bias.requires_grad = False
+                    
                 with autocast(enabled=self.args.half):
                     output = self.model(data)
                     if self.output_transformations is not None:
                         output = self.output_transformations(output)
 
-                    if hasattr(self.args.model, 'returns_loss') and self.args.model.returns_loss:
-                        loss = output
-                    else:
-                        loss = self.criterion(output, target)
-                    loss = loss / self.args.train_dataset.update_every
 
-                if hasattr(self.args.optimizer, "grad_penalty") and self.args.optimizer.grad_penalty is not None and self.args.optimizer.grad_penalty > 0.0:
-                    # Creates gradients
-                    scaled_grad_params = torch.autograd.grad(outputs=self.scaler.scale(loss), inputs=self.model.parameters(), create_graph=True)
-
-                    # Creates unscaled grad_params before computing the penalty. scaled_grad_params are
-                    # not owned by any optimizer, so ordinary division is used instead of scaler.unscale_:
-                    inv_scale = 1. / self.scaler.get_scale()
-                    grad_params = [p * inv_scale for p in scaled_grad_params]
-
-                    # Computes the penalty term and adds it to the loss
-                    with autocast():
-                        grad_norm = 0
-                        for grad in grad_params:
-                            grad_norm += grad.pow(2).sum()
-                        grad_norm = grad_norm.sqrt()
-                        loss = loss + (grad_norm * self.args.optimizer.grad_penalty)
+                    loss = self.criterion(output, target)
 
                 self.scaler.scale(loss).backward()
+                if first_loss is None:
+                    first_loss = loss
 
-                if hasattr(self.args.optimizer, "batch_replay") and self.args.optimizer.batch_replay:
-                    found_inf = False
-                    for _, param in self.model.named_parameters():
-                        if param.grad.isnan().any() or param.grad.isinf().any():
-                            found_inf = True
-                            break
-                    if found_inf:
-                        self.scaler.update()
-                        self.optimizer.zero_grad()  # (set_to_none=True)
-                        self.model.zero_grad(set_to_none=True)
-                        if type(self.args.optimizer.batch_replay) == int or type(
-                                self.args.optimizer.batch_replay) == float:
-                            self.args.optimizer.batch_replay -= 1
-                    else:
-                        break
-                else:
-                    break
-
-            if self.train_batch_plot_idx % self.args.train_dataset.update_every == 0:
                 step_partial_func = partial(self.scaler.step)
-                if "metric" in [param.name for param in signature(self.optimizer.step).parameters.values()]:
-                    step_partial_func = partial(step_partial_func, metric=metric)
-                    # step_partial_func = partial(self.scaler.step, metric=None)
-
-                if hasattr(self.args.optimizer, "use_SAM") and self.args.optimizer.use_SAM:
-                    step_partial_func = partial(step_partial_func, closure=sam_closure)
-
                 self.scaler.unscale_(self.optimizer)
 
-                if hasattr(self.args.optimizer, "max_norm") and self.args.optimizer.max_norm > 0.0:
-                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.args.optimizer.max_norm)
-
                 step_partial_func(self.optimizer)
-                # self.model.update_moving_average()
 
                 self.scaler.update()
 
@@ -539,10 +447,17 @@ class Solver(object):
 
                 if self.scheduler_name == "OneCycleLR":
                     self.scheduler.step()
+                
+                if backforward and l is not None:
+                    l.weight.requires_grad = True
+                    l.bias.requires_grad = True
+                else:
+                    break
 
             predictions.extend(output)
             targets.extend(target)
 
+            print(first_loss)
             metrics_results = {}
             for metric in self.metrics['train']['batch']:
                 metrics_results["Train/Batch-" + metric.name] = metric.calculate(output, target, level='batch')
@@ -778,19 +693,20 @@ class Solver(object):
         except KeyboardInterrupt:
             pass
 
-        print("===> BEST "+self.args.optimized_metric+" PERFORMANCE: %.5f" % best_metrics[self.args.optimized_metric])
-        files = os.listdir(self.save_dir)
-        paths = [os.path.join(self.save_dir, basename) for basename in files if "_0" not in basename]
-        if len(paths) > 0:
-            src = max(paths, key=os.path.getctime)
-            copyfile(src, os.path.join("runs", self.args.save_dir, os.path.basename(src)))
+        if self.args.save_model:
+            print("===> BEST "+self.args.optimized_metric+" PERFORMANCE: %.5f" % best_metrics[self.args.optimized_metric])
+            files = os.listdir(self.save_dir)
+            paths = [os.path.join(self.save_dir, basename) for basename in files if "_0" not in basename]
+            if len(paths) > 0:
+                src = max(paths, key=os.path.getctime)
+                copyfile(src, os.path.join("runs", self.args.save_dir, os.path.basename(src)))
 
-        with open("runs/" + self.args.save_dir + "/README.md", 'a+') as f:
-            f.write("\n## "+self.args.optimized_metric+"\n %.5f" % (best_metrics[self.args.optimized_metric]))
-        tensorboard_export_dump(self.writer)
-        print("Saved best accuracy checkpoint")
+            with open("runs/" + self.args.save_dir + "/README.md", 'a+') as f:
+                f.write("\n## "+self.args.optimized_metric+"\n %.5f" % (best_metrics[self.args.optimized_metric]))
+            tensorboard_export_dump(self.writer)
+            print("Saved best accuracy checkpoint")
 
-        return best_metrics[self.args.optimized_metric]
+            return best_metrics[self.args.optimized_metric]
 
 
     def get_train_batch_plot_idx(self):
