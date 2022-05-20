@@ -1,0 +1,5 @@
+# @package loss
+
+bcewithlogits:
+  class_weights: 
+  reduce : 

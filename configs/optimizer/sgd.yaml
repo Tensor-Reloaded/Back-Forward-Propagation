@@ -1,0 +1,19 @@
+# @package optimizer
+
+name: "SGD"
+parameters:
+  lr: 0.01
+  weight_decay: 0.0001
+  momentum: 0.9
+  nesterov: True
+
+max_norm: 0.0
+grad_penalty: 0.0
+batch_replay: False
+
+use_lookahead: False
+lookahead_k: 5
+lookahead_alpha: 0.5
+
+use_SAM: False
+SAM_rho: 0.5

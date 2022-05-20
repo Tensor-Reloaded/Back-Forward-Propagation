@@ -1,0 +1,5 @@
+# @package loss
+
+crossentropyloss:
+  class_weights:
+  reduction: 'mean' 

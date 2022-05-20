@@ -1,10 +1,29 @@
+# PyCarhm specific
+.idea/*
+
+data/
+
+# VS Code specific
+.vscode
+
+# Mac specific
+.DS_store
+
+# Output logs
+outputs
+multirun
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
 *$py.class
 *.pth
+.hydra
+
 
 **/events.out.tfevents.*
+!results/**/events.out.tfevents.*
+!results*/**/events.out.tfevents.*
 # C extensions
 *.so
 
@@ -104,3 +123,6 @@ venv.bak/
 
 # mypy
 .mypy_cache/
+
+.fake
+.ionide

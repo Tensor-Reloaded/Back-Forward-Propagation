@@ -1,0 +1,5 @@
+# @package scheduler
+
+MultiStepLR:
+  milestones: [30,60,90,120,180,240,290]
+  gamma: 0.5
