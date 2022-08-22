@@ -111,3 +111,11 @@ def save_current_code(path: str):
                 if file.split(".")[-1] in unwanted_extensions:
                     continue
                 z.write(os.path.join(project_root, root, file), os.path.join(root, file))
+
+
+modules_list = []
+
+
+def capture_hook(module, forward_input, forward_output):
+    modules_list.append(module)
+

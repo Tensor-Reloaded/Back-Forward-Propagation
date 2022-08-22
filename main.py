@@ -30,7 +30,7 @@ from hydra.utils import get_original_cwd, to_absolute_path
 from omegaconf import DictConfig, OmegaConf
 
 from utils import *
-from utils.misc import progress_bar, save_current_code
+from utils.misc import progress_bar, save_current_code, capture_hook, modules_list
 import models
 
 
@@ -253,6 +253,12 @@ class Solver(object):
             else:
                 self.model.load_state_dict(torch.load(self.args.load_model, map_location=self.device))
         self.model = self.model.to(self.device)
+        self.hooks = {}
+        names = [x[0] for x in self.model.named_modules()]
+        for name, module in self.model.named_modules():
+            if not any(map(lambda x: x.startswith(name) and x != name, names)):
+                # print(name)
+                self.hooks[name] = module.register_forward_hook(capture_hook)
 
     def init_optimizer(self):
         parameters = OmegaConf.to_container(self.args.optimizer.parameters, resolve=True)
@@ -380,6 +386,10 @@ class Solver(object):
     def enable_bn(self):
         self.model.train()
 
+    def remove_hooks(self):
+        # TODO
+        pass
+
     def train(self):
         print("train:")
         self.model.train()
@@ -389,7 +399,6 @@ class Solver(object):
         
         # self.model.fc2.weight.requires_grad = False
         # self.model.fc2.bias.requires_grad = False
-        
         
         total_loss = 0
         correct = 0
@@ -414,15 +423,13 @@ class Solver(object):
             #     accumulation_data.append(data)
             #     accumulation_target.append(target)
 
-
-
-            backforward=Trye
+            backforward = False
             first_loss = None
-            for l in [self.model.fc2, self.model.fc1, None]:
+            for l in [None]:
                 if backforward and l is not None:
                     l.weight.requires_grad = False
                     l.bias.requires_grad = False
-                    
+
                 with autocast(enabled=self.args.half):
                     output = self.model(data)
                     if self.output_transformations is not None:
@@ -470,6 +477,7 @@ class Solver(object):
             if self.args.progress_bar:
                 progress_bar(batch_num, len(self.train_loader))
 
+        print(len(modules_list))
         return torch.stack(predictions), torch.stack(targets)
 
     def val(self):
