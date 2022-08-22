@@ -253,12 +253,14 @@ class Solver(object):
             else:
                 self.model.load_state_dict(torch.load(self.args.load_model, map_location=self.device))
         self.model = self.model.to(self.device)
-        self.hooks = {}
+        self.capture_hooks = {}
         names = [x[0] for x in self.model.named_modules()]
         for name, module in self.model.named_modules():
+            # if the lambda is true, than this means that name is a parent module, and we don't want to add hook to it
             if not any(map(lambda x: x.startswith(name) and x != name, names)):
                 # print(name)
-                self.hooks[name] = module.register_forward_hook(capture_hook)
+                self.capture_hooks[name] = module.register_forward_hook(capture_hook)
+        self.capture_hooks_enabled = True
 
     def init_optimizer(self):
         parameters = OmegaConf.to_container(self.args.optimizer.parameters, resolve=True)
@@ -386,9 +388,10 @@ class Solver(object):
     def enable_bn(self):
         self.model.train()
 
-    def remove_hooks(self):
-        # TODO
-        pass
+    def remove_capture_hooks(self):
+        for key in self.capture_hooks:
+            self.capture_hooks[key].remove()
+        self.capture_hooks = {}
 
     def train(self):
         print("train:")
@@ -406,6 +409,32 @@ class Solver(object):
 
         # accumulation_data = []
         # accumulation_target = []
+
+        if self.capture_hooks_enabled:
+            for batch_num, (data, target) in enumerate(self.train_loader):
+                if isinstance(data, list) or isinstance(data, tuple):
+                    data = [i.to(self.device) for i in data]
+                else:
+                    data = data.to(self.device)
+                if isinstance(target, list) or isinstance(target, tuple):
+                    target = [i.to(self.device) for i in target]
+                else:
+                    target = target.to(self.device)
+
+                with autocast(enabled=self.args.half):
+                    output = self.model(data)
+                    if self.output_transformations is not None:
+                        output = self.output_transformations(output)
+
+                    loss = self.criterion(output, target)
+
+                self.optimizer.zero_grad()  # (set_to_none=True)
+                self.model.zero_grad(set_to_none=True)
+                break
+
+            self.capture_hooks_enabled = False
+            self.remove_capture_hooks()
+
 
         predictions = []
         targets = []
@@ -434,7 +463,6 @@ class Solver(object):
                     output = self.model(data)
                     if self.output_transformations is not None:
                         output = self.output_transformations(output)
-
 
                     loss = self.criterion(output, target)
 
