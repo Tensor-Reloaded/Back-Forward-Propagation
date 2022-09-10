@@ -414,9 +414,7 @@ class Solver(object):
             #     accumulation_data.append(data)
             #     accumulation_target.append(target)
 
-
-
-            backforward=Trye
+            backforward = True
             first_loss = None
             for l in [self.model.fc2, self.model.fc1, None]:
                 if backforward and l is not None:
@@ -457,7 +455,7 @@ class Solver(object):
             predictions.extend(output)
             targets.extend(target)
 
-            print(first_loss)
+            # print(first_loss)
             metrics_results = {}
             for metric in self.metrics['train']['batch']:
                 metrics_results["Train/Batch-" + metric.name] = metric.calculate(output, target, level='batch')
