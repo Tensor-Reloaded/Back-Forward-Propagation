@@ -414,7 +414,7 @@ class Solver(object):
             #     accumulation_data.append(data)
             #     accumulation_target.append(target)
 
-            backforward = True
+            backforward = False
             first_loss = None
             for l in [self.model.fc2, self.model.fc1, None]:
                 if backforward and l is not None:

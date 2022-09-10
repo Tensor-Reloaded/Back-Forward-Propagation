@@ -6,8 +6,8 @@ device: 'cuda:0'
 seed: 2525
 progress_bar: True
 
-save_model: False
-save_interval: 100
+save_model: True
+save_interval: 10
 
 epochs: 1000
 val_every: 5
