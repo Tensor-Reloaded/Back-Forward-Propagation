@@ -414,7 +414,7 @@ class Solver(object):
             #     accumulation_data.append(data)
             #     accumulation_target.append(target)
 
-            backforward = False
+            backforward = True
             first_loss = None
             layers = [self.model.fc1, self.model.fc2, self.model.fc3, self.model.fc4]
             for l in layers:
