@@ -414,47 +414,42 @@ class Solver(object):
             #     accumulation_data.append(data)
             #     accumulation_target.append(target)
 
-            backforward = True
+            backforward = False
             first_loss = None
-            layers = [self.model.fc1, self.model.fc2, self.model.fc3, self.model.fc4]
-            for l in layers:
-                if backforward:
-                    for layer in layers:
-                        layer.weight.requires_grad = False
-                        layer.bias.requires_grad = False
-                    l.weight.requires_grad = True
-                    l.bias.requires_grad = True
+            for l in [self.model.fc2, self.model.fc1, None]:
+                if backforward and l is not None:
+                    l.weight.requires_grad = False
+                    l.bias.requires_grad = False
+
                 with autocast(enabled=self.args.half):
                     output = self.model(data)
-                    # if self.output_transformations is not None:
-                    #     output = self.output_transformations(output)
+                    if self.output_transformations is not None:
+                        output = self.output_transformations(output)
 
                     loss = self.criterion(output, target)
 
                 self.scaler.scale(loss).backward()
-                # print("Loss = ", loss)
                 if first_loss is None:
-                    first_loss = loss.detach().cpu()
+                    first_loss = loss
 
                 step_partial_func = partial(self.scaler.step)
-                # self.scaler.unscale_(self.optimizer)
+                self.scaler.unscale_(self.optimizer)
 
                 step_partial_func(self.optimizer)
 
-                # self.scaler.update()
+                self.scaler.update()
 
                 self.optimizer.zero_grad()  # (set_to_none=True)
                 self.model.zero_grad(set_to_none=True)
 
-                # if self.scheduler_name == "OneCycleLR":
-                #     self.scheduler.step()
-                
-                if not backforward:
-                    break
+                if self.scheduler_name == "OneCycleLR":
+                    self.scheduler.step()
+
+                if backforward and l is not None:
+                    l.weight.requires_grad = True
+                    l.bias.requires_grad = True
                 else:
-                    for layer in layers:
-                        layer.weight.requires_grad = True
-                        layer.bias.requires_grad = True
+                    break
 
             predictions.extend(output)
             targets.extend(target)
