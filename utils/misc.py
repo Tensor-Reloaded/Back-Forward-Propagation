@@ -119,3 +119,5 @@ modules_list = []
 def capture_hook(module, forward_input, forward_output):
     modules_list.append(module)
 
+def backward_hook(module, grad_input, grad_output):
+        module.grad_output = grad_output

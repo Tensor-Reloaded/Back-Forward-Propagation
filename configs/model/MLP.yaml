@@ -3,5 +3,5 @@
 name: MLP
 parameters:
   input_size: 784
-  hidden_size: 256
+  hidden_size: 100
   output_size: 10

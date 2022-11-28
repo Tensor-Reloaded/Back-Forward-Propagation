@@ -1,16 +1,16 @@
 defaults:
   - _self_
   - common: default
-  - dataset/train@train_dataset: CIFAR10
-  - dataset/val@val_dataset: CIFAR10
+  - dataset/train@train_dataset: MNIST
+  - dataset/val@val_dataset: MNIST
   - optional hyperparameters: 
   - initializer: default
   - loss: crossentropyloss
   - metrics@train_metrics: [acc_ce] 
   - metrics@val_metrics: [acc_ce] 
   - metrics@solver_metrics: [solver] 
-  - model: PreResNet20
-  - optimizer: sgd_one_shot 
+  - model: MLP
+  - optimizer: sgd
   - scheduler: StaticScheduler
   - override hydra/sweeper: basic   # nevergrad | basic
   - override hydra/launcher: basic
@@ -24,3 +24,5 @@ load_optimizer: ""
 load_training_state: ""
 
 infer_only: False
+
+backforward: True

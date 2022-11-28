@@ -30,7 +30,7 @@ from hydra.utils import get_original_cwd, to_absolute_path
 from omegaconf import DictConfig, OmegaConf
 
 from utils import *
-from utils.misc import progress_bar, save_current_code, capture_hook, modules_list
+from utils.misc import progress_bar, save_current_code, capture_hook, backward_hook, modules_list
 import models
 
 
@@ -66,7 +66,6 @@ class Solver(object):
         self.val_loader = None
         self.infer_loader = None
         self.es = EarlyStopping(patience=self.args.es_patience, min_delta=self.args.es_min_delta)
-        self.scaler = GradScaler(enabled=self.args.half and self.args.grad_scaler)
 
 
         if not self.args.save_dir:
@@ -253,14 +252,18 @@ class Solver(object):
             else:
                 self.model.load_state_dict(torch.load(self.args.load_model, map_location=self.device))
         self.model = self.model.to(self.device)
-        self.capture_hooks = {}
-        names = [x[0] for x in self.model.named_modules()]
-        for name, module in self.model.named_modules():
-            # if the lambda is true, than this means that name is a parent module, and we don't want to add hook to it
-            if not any(map(lambda x: x.startswith(name) and x != name, names)):
-                # print(name)
-                self.capture_hooks[name] = module.register_forward_hook(capture_hook)
-        self.capture_hooks_enabled = True
+        
+        for l in [self.model.fc2, self.model.fc3, self.model.fc4]:
+            l.register_full_backward_hook(backward_hook)
+            
+        # self.capture_hooks = {}
+        # names = [x[0] for x in self.model.named_modules()]
+        # for name, module in self.model.named_modules():
+        #     # if the lambda is true, than this means that name is a parent module, and we don't want to add hook to it
+        #     if not any(map(lambda x: x.startswith(name) and x != name, names)):
+        #         # print(name)
+        #         self.capture_hooks[name] = module.register_forward_hook(capture_hook)
+        # self.capture_hooks_enabled = True
 
     def init_optimizer(self):
         parameters = OmegaConf.to_container(self.args.optimizer.parameters, resolve=True)
@@ -397,105 +400,90 @@ class Solver(object):
         print("train:")
         self.model.train()
         
-        # self.model.fc1.weight.requires_grad = False
-        # self.model.fc1.bias.requires_grad = False
-        
-        # self.model.fc2.weight.requires_grad = False
-        # self.model.fc2.bias.requires_grad = False
-        
         total_loss = 0
         correct = 0
         total = 0
 
-        # accumulation_data = []
-        # accumulation_target = []
-
-        if self.capture_hooks_enabled:
-            for batch_num, (data, target) in enumerate(self.train_loader):
-                if isinstance(data, list) or isinstance(data, tuple):
-                    data = [i.to(self.device) for i in data]
-                else:
-                    data = data.to(self.device)
-                if isinstance(target, list) or isinstance(target, tuple):
-                    target = [i.to(self.device) for i in target]
-                else:
-                    target = target.to(self.device)
-
-                with autocast(enabled=self.args.half):
-                    output = self.model(data)
-                    if self.output_transformations is not None:
-                        output = self.output_transformations(output)
-
-                    loss = self.criterion(output, target)
-
-                self.optimizer.zero_grad()  # (set_to_none=True)
-                self.model.zero_grad(set_to_none=True)
-                break
-
-            self.capture_hooks_enabled = False
-            self.remove_capture_hooks()
-
-
         predictions = []
         targets = []
+        
+        fc2_grad_diff = []
+        fc2_weight_grad_old = []
+        fc2_weight_grad_new = []
+        
+        fc3_grad_diff = []
+        fc3_weight_grad_old = []
+        fc3_weight_grad_new = []
+        
+        fc4_grad_diff = []
+        fc4_weight_grad_old = []
+        fc4_weight_grad_new = []
         for batch_num, (data, target) in enumerate(self.train_loader):
-            if isinstance(data, list) or isinstance(data, tuple):
-                data = [i.to(self.device) for i in data]
-            else:
-                data = data.to(self.device)
-            if isinstance(target, list) or isinstance(target, tuple):
-                target = [i.to(self.device) for i in target]
-            else:
-                target = target.to(self.device)
+            
+            data = data.to(self.device)
+            target = target.to(self.device)
 
-            # if self.args.optimizer.use_SAM:
-            #     accumulation_data.append(data)
-            #     accumulation_target.append(target)
+            output = self.model(data)
+            if self.output_transformations is not None:
+                output = self.output_transformations(output)
 
-            backforward = False
-            first_loss = None
-            for l in [None]:
-                if backforward and l is not None:
-                    l.weight.requires_grad = False
-                    l.bias.requires_grad = False
-
-                with autocast(enabled=self.args.half):
-                    output = self.model(data)
-                    if self.output_transformations is not None:
-                        output = self.output_transformations(output)
-
-                    loss = self.criterion(output, target)
-
-                self.scaler.scale(loss).backward()
-                if first_loss is None:
-                    first_loss = loss
-
-                step_partial_func = partial(self.scaler.step)
-                self.scaler.unscale_(self.optimizer)
-
-                step_partial_func(self.optimizer)
-
-                self.scaler.update()
-
-                self.optimizer.zero_grad()  # (set_to_none=True)
-                self.model.zero_grad(set_to_none=True)
-
-                if self.scheduler_name == "OneCycleLR":
-                    self.scheduler.step()
+            loss = self.criterion(output, target)
+            loss.backward()
+            
+            if self.args.backforward:
+                with torch.no_grad():
+                    self.model.fc1.weight.data.sub_(self.args.optimizer.parameters.lr * self.model.fc1.weight.grad)
+                    self.model.fc1.bias.data.sub_(self.args.optimizer.parameters.lr * self.model.fc1.bias.grad)
+                    aux_activations = F.relu(self.model.fc1(data))
                 
-                if backforward and l is not None:
-                    l.weight.requires_grad = True
-                    l.bias.requires_grad = True
-                else:
-                    break
+                grads = torch.autograd.grad(F.relu(self.model.fc2(aux_activations)), [self.model.fc2.weight,self.model.fc2.bias], self.model.fc2.grad_output)
+                fc2_grad_diff.append((grads[0]- self.model.fc2.weight.grad).sum().cpu().numpy())
+                fc2_weight_grad_old.append(self.model.fc2.weight.grad.sum().cpu().numpy())
+                fc2_weight_grad_new.append(grads[0].sum().cpu().numpy())
+                with torch.no_grad():
+                    self.model.fc2.weight.data.sub_(self.args.optimizer.parameters.lr * grads[0])
+                    self.model.fc2.bias.data.sub(self.args.optimizer.parameters.lr * grads[1])
+                    aux_activations = F.relu(self.model.fc2(aux_activations))
+                    
+                grads = torch.autograd.grad(F.relu(self.model.fc3(aux_activations)), [self.model.fc3.weight,self.model.fc3.bias], self.model.fc3.grad_output)
+                fc3_grad_diff.append((grads[0]- self.model.fc3.weight.grad).sum().cpu().numpy())
+                fc3_weight_grad_old.append(self.model.fc3.weight.grad.sum().cpu().numpy())
+                fc3_weight_grad_new.append(grads[0].sum().cpu().numpy())
+                with torch.no_grad():
+                    self.model.fc3.weight.data.sub_(self.args.optimizer.parameters.lr * grads[0])
+                    self.model.fc3.bias.data.sub(self.args.optimizer.parameters.lr * grads[1])
+                    aux_activations = F.relu(self.model.fc3(aux_activations))
+                    
+                grads = torch.autograd.grad(F.relu(self.model.fc4(aux_activations)), [self.model.fc4.weight,self.model.fc4.bias], self.model.fc4.grad_output)
+                fc4_grad_diff.append((grads[0]- self.model.fc4.weight.grad).sum().cpu().numpy())
+                fc4_weight_grad_old.append(self.model.fc4.weight.grad.sum().cpu().numpy())
+                fc4_weight_grad_new.append(grads[0].sum().cpu().numpy())
+                with torch.no_grad():
+                    self.model.fc4.weight.data.sub_(self.args.optimizer.parameters.lr * grads[0])
+                    self.model.fc4.bias.data.sub(self.args.optimizer.parameters.lr * grads[1])
+            else:
+                self.optimizer.step()
+            self.optimizer.zero_grad()
+            self.model.zero_grad()
 
             predictions.extend(output)
             targets.extend(target)
 
-            print(first_loss)
             metrics_results = {}
             for metric in self.metrics['train']['batch']:
                 metrics_results["Train/Batch-" + metric.name] = metric.calculate(output, target, level='batch')
+
+            metrics_results["Train/Batch-fc2_grad_diff"] = fc2_grad_diff[-1]
+            metrics_results["Train/Batch-fc2_weight_grad_old"] = fc2_weight_grad_old[-1]
+            metrics_results["Train/Batch-fc2_weight_grad_new"] = fc2_weight_grad_new[-1]            
+            
+            metrics_results["Train/Batch-fc3_grad_diff"] = fc3_grad_diff[-1]
+            metrics_results["Train/Batch-fc3_weight_grad_old"] = fc3_weight_grad_old[-1]
+            metrics_results["Train/Batch-fc3_weight_grad_new"] = fc3_weight_grad_new[-1] 
+            
+            metrics_results["Train/Batch-fc4_grad_diff"] = fc4_grad_diff[-1]
+            metrics_results["Train/Batch-fc4_weight_grad_old"] = fc3_weight_grad_old[-1]
+            metrics_results["Train/Batch-fc4_weight_grad_new"] = fc3_weight_grad_new[-1] 
 
             for metric in self.metrics['solver']['batch']:
                 metrics_results["Solver/Batch-" + metric.name] = metric.calculate(solver=self, level='batch')
@@ -505,7 +493,22 @@ class Solver(object):
             if self.args.progress_bar:
                 progress_bar(batch_num, len(self.train_loader))
 
-        print(len(modules_list))
+        
+        metrics_results = {}
+        metrics_results["Train/fc2_grad_diff"] = np.mean(fc2_grad_diff)
+        metrics_results["Train/fc2_weight_grad_old"] = np.mean(fc2_weight_grad_old)
+        metrics_results["Train/fc2_weight_grad_new"] = np.mean(fc2_weight_grad_new)
+        
+        metrics_results["Train/fc3_grad_diff"] = np.mean(fc3_grad_diff)
+        metrics_results["Train/fc3_weight_grad_old"] = np.mean(fc3_weight_grad_old)
+        metrics_results["Train/fc3_weight_grad_new"] = np.mean(fc3_weight_grad_new)
+        
+        metrics_results["Train/fc4_grad_diff"] = np.mean(fc4_grad_diff)
+        metrics_results["Train/fc4_weight_grad_old"] = np.mean(fc4_weight_grad_old)
+        metrics_results["Train/fc4_weight_grad_new"] = np.mean(fc4_weight_grad_new)
+        
+        print_metrics(self.writer, metrics_results, self.epoch)
+
         return torch.stack(predictions), torch.stack(targets)
 
     def val(self):
@@ -519,24 +522,14 @@ class Solver(object):
         targets = []
         with torch.no_grad():
             for batch_num, (data, target) in enumerate(self.val_loader):
-                if isinstance(data, list):
-                    data = [i.to(self.device) for i in data]
-                else:
-                    data = data.to(self.device)
-                if isinstance(target, list):
-                    target = [i.to(self.device) for i in target]
-                else:
-                    target = target.to(self.device)
+                data = data.to(self.device)
+                target = target.to(self.device)
 
-                with autocast(enabled=self.args.half):
-                    output = self.model(data)
-                    if self.output_transformations is not None:
-                        output = self.output_transformations(output)
+                output = self.model(data)
+                if self.output_transformations is not None:
+                    output = self.output_transformations(output)
 
-                    if hasattr(self.args.model, 'returns_loss') and self.args.model.returns_loss:
-                        loss = output
-                    else:
-                        loss = self.criterion(output, target)
+                loss = self.criterion(output, target)
 
                 predictions.extend(output)
                 targets.extend(target)

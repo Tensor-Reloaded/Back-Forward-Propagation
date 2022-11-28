@@ -9,12 +9,12 @@ load_params:
 save_in_memory: true
 
 shuffle: True
-batch_size: 4
+batch_size: 32
 num_workers: 0
 pin_memory: true
 drop_last: true
 
-subset: 4
+subset: 0.0
 update_every: 1
 
 transform: general/mnist
