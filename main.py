@@ -416,31 +416,41 @@ class Solver(object):
                     self.model.fc1.bias.data = self.model.fc1.bias.data.sub(self.args.optimizer.parameters.lr * self.model.fc1.bias.grad)
                     aux_activations = F.relu(self.model.fc1(data))
 
-                grads = torch.autograd.grad(F.relu(self.model.fc2(aux_activations)), [self.model.fc2.weight,self.model.fc2.bias], self.model.fc2.grad_output)
-                fc2_grad_diff.append((grads[0] - self.model.fc2.weight.grad).sum().cpu().numpy())
-                fc2_weight_grad_old.append(self.model.fc2.weight.grad.sum().cpu().numpy())
-                fc2_weight_grad_new.append(grads[0].sum().cpu().numpy())
+                fc2_output = F.relu(self.model.fc2(aux_activations))
+                grads = torch.autograd.grad(fc2_output, [self.model.fc2.weight, self.model.fc2.bias], self.model.fc2.grad_output)
+
+                fc2_grad_diff.append((grads[1] - self.model.fc2.bias.grad).sum().cpu().numpy())
+                fc2_weight_grad_old.append(self.model.fc2.bias.grad.sum().cpu().numpy())
+                fc2_weight_grad_new.append(grads[1].sum().cpu().numpy())
+
                 with torch.no_grad():
                     self.model.fc2.weight.data = self.model.fc2.weight.data.sub(self.args.optimizer.parameters.lr * grads[0])
                     self.model.fc2.bias.data = self.model.fc2.bias.data.sub(self.args.optimizer.parameters.lr * grads[1])
                     aux_activations = F.relu(self.model.fc2(aux_activations))
 
-                grads = torch.autograd.grad(F.relu(self.model.fc3(aux_activations)), [self.model.fc3.weight,self.model.fc3.bias], self.model.fc3.grad_output)
-                fc3_grad_diff.append((grads[0]- self.model.fc3.weight.grad).sum().cpu().numpy())
-                fc3_weight_grad_old.append(self.model.fc3.weight.grad.sum().cpu().numpy())
-                fc3_weight_grad_new.append(grads[0].sum().cpu().numpy())
+                fc3_output = F.relu(self.model.fc3(aux_activations))
+                grads = torch.autograd.grad(fc3_output, [self.model.fc3.weight, self.model.fc3.bias], self.model.fc3.grad_output)
+
+                fc3_grad_diff.append((grads[1] - self.model.fc3.bias.grad).sum().cpu().numpy())
+                fc3_weight_grad_old.append(self.model.fc3.bias.grad.sum().cpu().numpy())
+                fc3_weight_grad_new.append(grads[1].sum().cpu().numpy())
+
                 with torch.no_grad():
                     self.model.fc3.weight.data = self.model.fc3.weight.data.sub(self.args.optimizer.parameters.lr * grads[0])
                     self.model.fc3.bias.data = self.model.fc3.bias.data.sub(self.args.optimizer.parameters.lr * grads[1])
                     aux_activations = F.relu(self.model.fc3(aux_activations))
 
-                grads = torch.autograd.grad(F.relu(self.model.fc4(aux_activations)), [self.model.fc4.weight,self.model.fc4.bias], self.model.fc4.grad_output)
-                fc4_grad_diff.append((grads[0]- self.model.fc4.weight.grad).sum().cpu().numpy())
-                fc4_weight_grad_old.append(self.model.fc4.weight.grad.sum().cpu().numpy())
-                fc4_weight_grad_new.append(grads[0].sum().cpu().numpy())
+                fc4_output = F.relu(self.model.fc4(aux_activations))
+                grads = torch.autograd.grad(fc4_output, [self.model.fc4.weight, self.model.fc4.bias], self.model.fc4.grad_output)
+
+                fc4_grad_diff.append((grads[1] - self.model.fc4.bias.grad).sum().cpu().numpy())
+                fc4_weight_grad_old.append(self.model.fc4.bias.grad.sum().cpu().numpy())
+                fc4_weight_grad_new.append(grads[1].sum().cpu().numpy())
+
                 with torch.no_grad():
                     self.model.fc4.weight.data = self.model.fc4.weight.data.sub(self.args.optimizer.parameters.lr * grads[0])
                     self.model.fc4.bias.data = self.model.fc4.bias.data.sub(self.args.optimizer.parameters.lr * grads[1])
+
             else:
                 self.optimizer.step()
             self.optimizer.zero_grad()
@@ -455,15 +465,15 @@ class Solver(object):
 
             metrics_results["Train/Batch-fc2_grad_diff"] = fc2_grad_diff[-1]
             metrics_results["Train/Batch-fc2_weight_grad_old"] = fc2_weight_grad_old[-1]
-            metrics_results["Train/Batch-fc2_weight_grad_new"] = fc2_weight_grad_new[-1]            
-            
+            metrics_results["Train/Batch-fc2_weight_grad_new"] = fc2_weight_grad_new[-1]
+
             metrics_results["Train/Batch-fc3_grad_diff"] = fc3_grad_diff[-1]
             metrics_results["Train/Batch-fc3_weight_grad_old"] = fc3_weight_grad_old[-1]
-            metrics_results["Train/Batch-fc3_weight_grad_new"] = fc3_weight_grad_new[-1] 
-            
+            metrics_results["Train/Batch-fc3_weight_grad_new"] = fc3_weight_grad_new[-1]
+
             metrics_results["Train/Batch-fc4_grad_diff"] = fc4_grad_diff[-1]
             metrics_results["Train/Batch-fc4_weight_grad_old"] = fc3_weight_grad_old[-1]
-            metrics_results["Train/Batch-fc4_weight_grad_new"] = fc3_weight_grad_new[-1] 
+            metrics_results["Train/Batch-fc4_weight_grad_new"] = fc3_weight_grad_new[-1]
 
             for metric in self.metrics['solver']['batch']:
                 metrics_results["Solver/Batch-" + metric.name] = metric.calculate(solver=self, level='batch')
@@ -478,15 +488,15 @@ class Solver(object):
         metrics_results["Train/fc2_grad_diff"] = np.mean(fc2_grad_diff)
         metrics_results["Train/fc2_weight_grad_old"] = np.mean(fc2_weight_grad_old)
         metrics_results["Train/fc2_weight_grad_new"] = np.mean(fc2_weight_grad_new)
-        
+
         metrics_results["Train/fc3_grad_diff"] = np.mean(fc3_grad_diff)
         metrics_results["Train/fc3_weight_grad_old"] = np.mean(fc3_weight_grad_old)
         metrics_results["Train/fc3_weight_grad_new"] = np.mean(fc3_weight_grad_new)
-        
+
         metrics_results["Train/fc4_grad_diff"] = np.mean(fc4_grad_diff)
         metrics_results["Train/fc4_weight_grad_old"] = np.mean(fc4_weight_grad_old)
         metrics_results["Train/fc4_weight_grad_new"] = np.mean(fc4_weight_grad_new)
-        
+
         print_metrics(self.writer, metrics_results, self.epoch)
 
         return torch.stack(predictions), torch.stack(targets)
