@@ -1,38 +1,27 @@
-import collections
-import sys
-import pprint
-import argparse
-import pickle
 import os
-import re
-from multiprocessing import Process, freeze_support
-from shutil import copyfile
-import pandas as pd
-
-from inspect import signature
-from functools import partial
-import numpy as np
 from collections import OrderedDict
-from skimage import transform
+from shutil import copyfile
+
+import hydra
+import numpy as np
+import pandas as pd
 import torch.backends.cudnn as cudnn
-import torch.optim as optim
-import torch_optimizer
 import torch.nn as nn
 import torch.nn.functional as F
+import torch.optim as optim
 import torch.utils.data
+import torch_optimizer
+from hydra.utils import to_absolute_path
+from omegaconf import DictConfig, OmegaConf
+from torch.cuda.amp import autocast
 from torch.utils.data.sampler import SubsetRandomSampler
-from torch.cuda.amp import autocast, GradScaler
-import torchvision
 from torch.utils.tensorboard import SummaryWriter
 from torchvision import transforms as transforms
-import hydra
-from hydra.utils import get_original_cwd, to_absolute_path
-from omegaconf import DictConfig, OmegaConf
 
-from utils import *
-from utils.misc import progress_bar, save_current_code, capture_hook, backward_hook, modules_list
 import models
-
+from utils import EarlyStopping, transformations, TransformWrapper, MemoryStoredDataset, datasets, FastCollateMixup, \
+    optimizers, schedulers, losses, metrics, Metric, print_metrics, reset_seed, tensorboard_export_dump
+from utils.misc import progress_bar, save_current_code, backward_hook
 
 
 @hydra.main(config_path='configs', config_name='config')
@@ -255,15 +244,6 @@ class Solver(object):
         
         for l in [self.model.fc2, self.model.fc3, self.model.fc4]:
             l.register_full_backward_hook(backward_hook)
-            
-        # self.capture_hooks = {}
-        # names = [x[0] for x in self.model.named_modules()]
-        # for name, module in self.model.named_modules():
-        #     # if the lambda is true, than this means that name is a parent module, and we don't want to add hook to it
-        #     if not any(map(lambda x: x.startswith(name) and x != name, names)):
-        #         # print(name)
-        #         self.capture_hooks[name] = module.register_forward_hook(capture_hook)
-        # self.capture_hooks_enabled = True
 
     def init_optimizer(self):
         parameters = OmegaConf.to_container(self.args.optimizer.parameters, resolve=True)
@@ -432,35 +412,35 @@ class Solver(object):
             
             if self.args.backforward:
                 with torch.no_grad():
-                    self.model.fc1.weight.data.sub_(self.args.optimizer.parameters.lr * self.model.fc1.weight.grad)
-                    self.model.fc1.bias.data.sub_(self.args.optimizer.parameters.lr * self.model.fc1.bias.grad)
+                    self.model.fc1.weight.data = self.model.fc1.weight.data.sub(self.args.optimizer.parameters.lr * self.model.fc1.weight.grad)
+                    self.model.fc1.bias.data = self.model.fc1.bias.data.sub(self.args.optimizer.parameters.lr * self.model.fc1.bias.grad)
                     aux_activations = F.relu(self.model.fc1(data))
-                
+
                 grads = torch.autograd.grad(F.relu(self.model.fc2(aux_activations)), [self.model.fc2.weight,self.model.fc2.bias], self.model.fc2.grad_output)
-                fc2_grad_diff.append((grads[0]- self.model.fc2.weight.grad).sum().cpu().numpy())
+                fc2_grad_diff.append((grads[0] - self.model.fc2.weight.grad).sum().cpu().numpy())
                 fc2_weight_grad_old.append(self.model.fc2.weight.grad.sum().cpu().numpy())
                 fc2_weight_grad_new.append(grads[0].sum().cpu().numpy())
                 with torch.no_grad():
-                    self.model.fc2.weight.data.sub_(self.args.optimizer.parameters.lr * grads[0])
-                    self.model.fc2.bias.data.sub(self.args.optimizer.parameters.lr * grads[1])
+                    self.model.fc2.weight.data = self.model.fc2.weight.data.sub(self.args.optimizer.parameters.lr * grads[0])
+                    self.model.fc2.bias.data = self.model.fc2.bias.data.sub(self.args.optimizer.parameters.lr * grads[1])
                     aux_activations = F.relu(self.model.fc2(aux_activations))
-                    
+
                 grads = torch.autograd.grad(F.relu(self.model.fc3(aux_activations)), [self.model.fc3.weight,self.model.fc3.bias], self.model.fc3.grad_output)
                 fc3_grad_diff.append((grads[0]- self.model.fc3.weight.grad).sum().cpu().numpy())
                 fc3_weight_grad_old.append(self.model.fc3.weight.grad.sum().cpu().numpy())
                 fc3_weight_grad_new.append(grads[0].sum().cpu().numpy())
                 with torch.no_grad():
-                    self.model.fc3.weight.data.sub_(self.args.optimizer.parameters.lr * grads[0])
-                    self.model.fc3.bias.data.sub(self.args.optimizer.parameters.lr * grads[1])
+                    self.model.fc3.weight.data = self.model.fc3.weight.data.sub(self.args.optimizer.parameters.lr * grads[0])
+                    self.model.fc3.bias.data = self.model.fc3.bias.data.sub(self.args.optimizer.parameters.lr * grads[1])
                     aux_activations = F.relu(self.model.fc3(aux_activations))
-                    
+
                 grads = torch.autograd.grad(F.relu(self.model.fc4(aux_activations)), [self.model.fc4.weight,self.model.fc4.bias], self.model.fc4.grad_output)
                 fc4_grad_diff.append((grads[0]- self.model.fc4.weight.grad).sum().cpu().numpy())
                 fc4_weight_grad_old.append(self.model.fc4.weight.grad.sum().cpu().numpy())
                 fc4_weight_grad_new.append(grads[0].sum().cpu().numpy())
                 with torch.no_grad():
-                    self.model.fc4.weight.data.sub_(self.args.optimizer.parameters.lr * grads[0])
-                    self.model.fc4.bias.data.sub(self.args.optimizer.parameters.lr * grads[1])
+                    self.model.fc4.weight.data = self.model.fc4.weight.data.sub(self.args.optimizer.parameters.lr * grads[0])
+                    self.model.fc4.bias.data = self.model.fc4.bias.data.sub(self.args.optimizer.parameters.lr * grads[1])
             else:
                 self.optimizer.step()
             self.optimizer.zero_grad()
