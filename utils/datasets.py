@@ -1,24 +1,3 @@
-import os
-import hashlib
-import gzip
-import tarfile
-import re
-import pickle
-from PIL import Image
-import json
-
-import hydra
-from omegaconf import DictConfig, OmegaConf
-
-from skimage import io
-from skimage import transform
-from skimage.morphology import binary_erosion
-from skimage.transform import resize, rotate
-
-import pandas as pd
-import numpy as np
-
-import torch
 import torchvision
 from torch.utils.data import Dataset
 

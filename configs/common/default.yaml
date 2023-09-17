@@ -1,6 +1,6 @@
 # @package _global_
 
-half: False
+half: True
 grad_scaler: True
 device: 'cuda:0'
 seed: 2525
@@ -9,7 +9,7 @@ progress_bar: True
 save_model: False
 save_interval: 10
 
-epochs: 100
+epochs: 300
 val_every: 1
 es_patience: 100000
 es_min_delta: 0.0001

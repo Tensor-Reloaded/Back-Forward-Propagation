@@ -14,7 +14,7 @@ num_workers: 4
 pin_memory: true
 drop_last: true
 
-subset: 128
+subset: 0.1
 update_every: 1
 
 transform: train/cifar10

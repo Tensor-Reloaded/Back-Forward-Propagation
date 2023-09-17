@@ -1,3 +1,7 @@
+hydra:
+  job:
+    chdir: True
+
 defaults:
   - _self_
   - common: default
@@ -10,10 +14,12 @@ defaults:
   - metrics@val_metrics: [acc_ce] 
   - metrics@solver_metrics: [solver] 
   - model: MLP
-  - optimizer: sgd
+  - optimizer: sgd 
   - scheduler: StaticScheduler
   - override hydra/sweeper: basic   # nevergrad | basic
   - override hydra/launcher: basic
+
+restart_from_backup: False  # TODO: Use restart from backup everywhere
 
 aux_save_dir: 'baseline'
 storage_dir: "${oc.env:TENSOR_RELOADED_DATADIR}"
@@ -24,5 +30,3 @@ load_optimizer: ""
 load_training_state: ""
 
 infer_only: False
-
-backforward: True

@@ -1,14 +1,29 @@
+import logging
+
 import torch
-from torch.autograd import Variable
-import torch.nn.functional as F
-import numpy as np
+from omegaconf import OmegaConf
 from torch import nn
-try:
-    from itertools import ifilterfalse
-except ImportError:  # py3k
-    from itertools import filterfalse as ifilterfalse
+import torch.nn.functional as F
 
 
+def init_criterion(loss_config, device, is_dba):
+    (name, parameters) = list(loss_config.items())[0]
+    if name not in losses:
+        logging.error(f"Loss {name} does not exist!")
+        exit()
+
+    parameters = OmegaConf.to_container(parameters, resolve=True)
+    parameters = {k: v for k, v in parameters.items() if v is not None}
+    if "device" in parameters:
+        parameters["device"] = device
+
+    if is_dba:
+        parameters["reduction"] = 'none'
+
+    criterion = losses[name]['constructor'](**parameters).to(device)
+    return criterion
+
+# TODO: @deprecated, use better implementation of dice loss (library or replace with custom)
 class TorchDiceLoss(nn.Module):
     def __init__(self, weight=None, size_average=True, per_image=False, logits=False):
         super().__init__()
@@ -20,7 +35,7 @@ class TorchDiceLoss(nn.Module):
     def forward(self, outputs, targets):
         if self.logits:
             outputs = torch.sigmoid(outputs)
-        
+
         batch_size = outputs.size()[0]
         eps = 1e-5
         if not self.per_image:
@@ -33,9 +48,7 @@ class TorchDiceLoss(nn.Module):
         return loss
 
 
-
-
-
+# TODO: Replace with library
 class TorchFocalLoss(nn.Module):
     """Implementation of Focal Loss[1]_ modified from Catalyst [2]_ .
     Arguments
@@ -77,12 +90,13 @@ class TorchFocalLoss(nn.Module):
             BCE_loss = F.binary_cross_entropy(outputs, targets,
                                               reduction='none')
         pt = torch.exp(-BCE_loss)
-        F_loss = (1-pt)**self.gamma * BCE_loss
+        F_loss = (1 - pt) ** self.gamma * BCE_loss
         if self.reduce:
             return torch.mean(F_loss)
         else:
             return F_loss
 
+# TODO: Replace with library
 class TorchJaccardLoss(torch.nn.modules.Module):
     # modified from XD_XD's implementation
     def __init__(self):
@@ -111,16 +125,14 @@ class TorchStableBCELoss(torch.nn.modules.Module):
         loss = input.clamp(min=0) - input * target + (1 + neg_abs.exp()).log()
         return loss.mean()
 
-
-
+# TODO: Replace with library
 class SoftTargetCrossEntropy(torch.nn.modules.Module):
 
-    def __init__(self, class_weights = None, device='cuda'):
+    def __init__(self, class_weights=None, device='cuda'):
         super(SoftTargetCrossEntropy, self).__init__()
-        self.device = device
         self.class_weights = None
         if class_weights != None:
-            self.class_weights = torch.Tensor(class_weights).to(self.device)
+            self.class_weights = torch.Tensor(class_weights).to(device)
 
     def forward(self, x, target):
         lsm = F.log_softmax(x, dim=-1)
@@ -130,37 +142,32 @@ class SoftTargetCrossEntropy(torch.nn.modules.Module):
         return loss.mean()
 
 
+class CustomCrossEntropyLoss(torch.nn.modules.Module):
 
-class CrossEntropyLoss(torch.nn.modules.Module):
-
-    def __init__(self, class_weights = None, device='cuda', reduction='mean'):
-        super(CrossEntropyLoss, self).__init__()
-        self.device = device
+    def __init__(self, class_weights=None, device='cuda', reduction='mean'):
+        super(CustomCrossEntropyLoss, self).__init__()
         if class_weights != None:
-            w = torch.Tensor(class_weights).to(self.device)
+            w = torch.Tensor(class_weights).to(device)
             self.fnc = nn.CrossEntropyLoss(weight=w, reduction=reduction)
         else:
             self.fnc = nn.CrossEntropyLoss(reduction=reduction)
 
     def forward(self, prediction, target):
-        return self.fnc(prediction.float(),target.argmax(-1))
-
-
+        return self.fnc(prediction.float(), target.argmax(-1))
 
 
 class BCEWithLogitsLoss(torch.nn.modules.Module):
 
-    def __init__(self, class_weights = None, device='cuda'):
+    def __init__(self, class_weights=None, device='cuda'):
         super(BCEWithLogitsLoss, self).__init__()
-        self.device = device
         if class_weights != None:
-            w = torch.Tensor(class_weights).to(self.device)
+            w = torch.Tensor(class_weights).to(device)
             self.fnc = nn.BCEWithLogitsLoss(weight=w)
         else:
             self.fnc = nn.BCEWithLogitsLoss()
 
     def forward(self, prediction, target):
-        return self.fnc(prediction,target)
+        return self.fnc(prediction, target)
 
 
 losses = {
@@ -176,8 +183,12 @@ losses = {
         'constructor': nn.MSELoss,
         'higher_is_better': False
     },
+    'custom_crossentropyloss': {
+        'constructor': CustomCrossEntropyLoss,
+        'higher_is_better': False
+    },
     'crossentropyloss': {
-        'constructor': CrossEntropyLoss,
+        'constructor': nn.CrossEntropyLoss,
         'higher_is_better': False
     },
     'nllloss': {
