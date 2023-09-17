@@ -8,9 +8,7 @@ ImageNormalize:
   std: [0.3081]
   apply_to: 'input'
 
-LambdaTransform:
-  lambda_string: 'X.view(params)'
-  params: -1
+Flatten:
   apply_to: 'input'
 
 

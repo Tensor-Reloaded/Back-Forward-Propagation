@@ -116,6 +116,11 @@ class MinMaxNormalizationCached:
         return (tensor - self.minimum) / self.range
 
 
+class Flatten:
+    def __call__(self, tensor: Tensor) -> Tensor:
+        return tensor.view(-1)
+
+
 # Removed:
 # 1. LightingNoise
 # 2. LambdaTransform => Not useful, create real transform from it
@@ -202,4 +207,9 @@ transformations = {
         'constructor': MinMaxNormalizationCached,
         'cacheable': True,
     },
+    'Flatten': {
+        'constructor': Flatten,
+        'cacheable': False,
+    },
+
 }
