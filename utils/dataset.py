@@ -47,6 +47,8 @@ def init_dataset(dataset_config, cached_transforms, runtime_transforms, device) 
 
 
 def select_dataset_subset(dataset, subset: float) -> tuple:
+    if isinstance(subset, float) and subset == 1.0:
+        return tuple(dataset)
     if subset < 1.0:
         ix_size = int(subset * len(dataset))
     else:

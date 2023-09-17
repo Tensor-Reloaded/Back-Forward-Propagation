@@ -14,7 +14,7 @@ defaults:
   - metrics@val_metrics: [acc_ce] 
   - metrics@solver_metrics: [solver] 
   - model: MLP
-  - optimizer: sgd 
+  - optimizer: sgd_one_shot
   - scheduler: StaticScheduler
   - override hydra/sweeper: basic   # nevergrad | basic
   - override hydra/launcher: basic
@@ -30,3 +30,5 @@ load_optimizer: ""
 load_training_state: ""
 
 infer_only: False
+
+backforward: False
