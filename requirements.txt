@@ -21,5 +21,5 @@ opacus==1.0.1
 scikit-image==0.19.1
 torch-optimizer==0.3.0
 hydra-core==1.1.1
-opencv-python==4.5.5.62
+opencv-python==4.8.1.78
 seaborn==0.11.2
